@@ -1,0 +1,394 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Minus, Plus, Trash2 } from 'lucide-react';
+import Toastify from 'toastify-js';
+import Image from 'next/image';
+import 'toastify-js/src/toastify.css';
+
+import Header from '../components/header';
+import LogoSection from '../components/LogoSection';
+import MobileTopBar from '../components/HomePageTop';
+import Footer from '../components/Footer';
+import { API_BASE_URL } from '../utils/api';
+import { ChatBot } from '../components/ChatBot';
+
+type ProductTuple = [string, string, string, number, string]; // [id, name, image, price, alt]
+
+/** 🔐 Inject X-Frontend-Key on every request */
+const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
+const fetchWithKey = (url: string, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers || {});
+  headers.set('X-Frontend-Key', FRONTEND_KEY);
+  return fetch(url, { ...init, headers });
+};
+
+export default function PaymentCheckoutPage() {
+  const router = useRouter();
+  const [cartData, setCartData] = useState<{ products: ProductTuple[] }>({ products: [] });
+  const [loading, setLoading] = useState(true);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+  const [discountCode, setDiscountCode] = useState('');
+  const [userInfo, setUserInfo] = useState({
+    name: '', email: '', phone: '', company: '',
+    address: '', city: '', zip: '', instructions: '',
+  });
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('cart_user_id');
+    if (storedToken) setToken(storedToken);
+  }, []);
+
+  useEffect(() => {
+    const deviceUUID = localStorage.getItem('cart_user_id');
+    if (!deviceUUID) {
+      console.warn("❌ No device UUID found in localStorage.");
+      setLoading(false);
+      return;
+    }
+
+    const fetchCart = async () => {
+      try {
+        const res = await fetchWithKey(`${API_BASE_URL}/api/show-cart/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Device-UUID': deviceUUID,
+          },
+          body: JSON.stringify({ device_uuid: deviceUUID }),
+        });
+
+        const data = await res.json();
+        const items = data?.cart_items || [];
+        const q: Record<string, number> = {};
+        const p: Record<string, number> = {};
+        const prod: ProductTuple[] = [];
+
+        for (const item of items) {
+          const id = item.product_id;
+          q[id] = item.quantity || 1;
+          p[id] = parseFloat(item.product_price) || 0;
+          prod.push([
+            id,
+            item.product_name,
+            item.product_image || '/images/default.jpg',
+            item.product_price,
+            item.alt_text || '',
+          ]);
+        }
+
+        setQuantities(q);
+        setCustomPrices(p);
+        setCartData({ products: prod });
+      } catch (err) {
+        console.error('❌ Cart fetch error:', err);
+        setCartData({ products: [] });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCart();
+  }, []);
+
+  const subtotal = cartData.products.reduce(
+    (acc, [id]) => acc + (quantities[id] || 1) * (customPrices[id] || 0),
+    0
+  );
+  const tax = 50;
+  const shipping = 100;
+  const total = subtotal + tax + shipping;
+
+  const updateQuantity = (id: string, delta: number) => {
+    setQuantities((prev) => ({
+      ...prev,
+      [id]: Math.max(1, (prev[id] || 1) + delta),
+    }));
+  };
+
+  const removeItem = async (id: string) => {
+    setQuantities((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+
+    setCustomPrices((prev) => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+
+    setCartData((prev) => ({
+      ...prev,
+      products: prev.products.filter(([pid]) => pid !== id),
+    }));
+
+    try {
+      const res = await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: token, product_id: id }),
+      });
+
+      if (!res.ok) throw new Error();
+
+      Toastify({
+        text: 'Product removed from cart successfully',
+        duration: 3000,
+        gravity: 'top',
+        position: 'right',
+        backgroundColor: 'linear-gradient(to right, #af4c4cff, #d30000ff)',
+      }).showToast();
+    } catch {
+      Toastify({
+        text: 'Failed to remove product from cart',
+        duration: 3000,
+        gravity: 'top',
+        position: 'right',
+        backgroundColor: '#d32f2f',
+      }).showToast();
+    }
+  };
+
+  const handleOrderNow = async () => {
+    let msg =
+      Object.entries(userInfo)
+        .map(([key, val]) => `${key.charAt(0).toUpperCase() + key.slice(1)}: ${val || 'N/A'}`)
+        .join('\n') + '\n\nOrder:\n';
+
+    const itemsForBackend: any[] = [];
+    let hasError = false;
+
+    cartData.products.forEach(([id, name]) => {
+      const qty = quantities[id] || 1;
+      const price = customPrices[id] || 0;
+
+
+      msg += `${name} - ${qty} x $${price}\n`;
+
+      itemsForBackend.push({
+        product_id: id,
+        quantity: parseInt(qty.toString()),
+        unit_price: parseFloat(price.toFixed(2)),
+        total_price: parseFloat((price * qty).toFixed(2)),
+      });
+    });
+
+    if (!userInfo.email || !userInfo.address || !userInfo.city || !userInfo.phone) {
+      Toastify({
+        text: "Please fill in all required delivery fields",
+        duration: 3000,
+        backgroundColor: '#d32f2f',
+      }).showToast();
+      return;
+    }
+
+    if (hasError) return;
+
+    const payload = {
+      user_name: userInfo.name || 'Guest',
+      total_price: total.toFixed(2),
+      status: 'pending',
+      notes: 'Order from checkout page',
+      items: itemsForBackend,
+      delivery: {
+        name: userInfo.name,
+        email: userInfo.email,
+        phone: userInfo.phone,
+        street_address: userInfo.address,
+        city: userInfo.city,
+        zip_code: userInfo.zip,
+        instructions: userInfo.instructions?.trim() ? [userInfo.instructions.trim()] : [],
+      }
+    };
+
+    try {
+      const res = await fetchWithKey(`${API_BASE_URL}/api/save-order/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      Toastify({
+        text: "Order successfully placed!",
+        duration: 3000,
+        backgroundColor: "#c41717ff"
+      }).showToast();
+
+      // Clear Cart on frontend & backend
+      for (const item of cartData.products) {
+        try {
+          await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: token, product_id: item[0] }),
+          });
+        } catch (err) {
+          console.warn(`❌ Failed to delete item ${item[0]} after order:`, err);
+        }
+      }
+
+      setCartData({ products: [] });
+      setQuantities({});
+      setCustomPrices({});
+      window.open(`https://wa.me/923423773564?text=${encodeURIComponent(msg)}`, '_blank');
+
+    } catch (err) {
+      console.error('❌ Order save failed:', err);
+      Toastify({
+        text: "Failed to place order",
+        duration: 3000,
+        backgroundColor: "#d32f2f"
+      }).showToast();
+    }
+  };
+
+  const orderItems = cartData.products.map(([id, name, pic, , desc]) => ({
+    id,
+    name,
+    pic: pic || '/images/img1.jpg',
+    desc: desc || '',
+    quantity: quantities[id] || 1,
+    price: customPrices[id] || 0,
+  }));
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-xl text-gray-600">
+        Loading your cart...
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-screen bg-gray-50 text-black text-[3.5vw] sm:text-base">
+      {/* Header */}
+      <Header />
+      <LogoSection />
+      <MobileTopBar />
+      {/* Main Checkout Section */}
+      <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Delivery Section */}
+        <div className="bg-white shadow rounded-lg p-8">
+          <h2 className="text-2xl font-semibold mb-6 text-black">Delivery Address</h2>
+          <div className="space-y-4 text-black">
+            {[
+              { label: 'Full Name', key: 'name' },
+              { label: 'Email Address', key: 'email' },
+              { label: 'Phone', key: 'phone' },
+              { label: 'Company', key: 'company' },
+              { label: 'Street Address', key: 'address' },
+              { label: 'City', key: 'city' },
+              { label: 'Zip', key: 'zip' },
+              { label: 'Instructions', key: 'instructions' }
+            ].map(({ label, key }) => (
+              <div key={key} className={['phone', 'company', 'city', 'zip', 'instructions'].includes(key) ? 'w-full sm:w-1/2' : ''}>
+                <label className="text-sm font-medium">{label}</label>
+                <input
+                  type="text"
+                  onChange={(e) => setUserInfo((prev) => ({ ...prev, [key]: e.target.value }))}
+                  className="mt-1 w-full p-2 border border-gray-300 rounded-md bg-gray-50"
+                  inputMode={key === 'zip' || key === 'phone' ? 'numeric' : 'text'}
+                />
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={handleOrderNow}
+            disabled={cartData.products.length === 0}
+            className={`w-full mt-8 py-3 text-sm font-medium rounded-md transition-all
+        ${cartData.products.length === 0 
+          ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
+          : 'bg-[#891F1A] text-white hover:bg-[#6e1815]'}`}>
+            Order Now
+          </button>
+        </div>
+
+        {/* Order Summary */}
+        <div className="bg-white shadow rounded-lg p-8">
+          <h3 className="text-2xl font-semibold mb-6 text-black">Order</h3>
+          <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+            {orderItems.map((item) => (
+              <div
+                key={item.id}
+                className="flex flex-wrap sm:flex-nowrap items-center justify-between border p-3 rounded-md bg-gray-50 text-black">
+                <img
+                  src={item.pic || '/images/default.jpg'}
+                  alt={item.name}
+                  width={56}
+                  height={56}
+                  loading="lazy"
+                  className="w-14 h-14 object-cover rounded flex-shrink-0"
+                  onError={(e) => (e.currentTarget.src = '/images/default.jpg')}
+                />
+                <div className="flex-1 ml-4 text-sm min-w-[120px]">
+                  <p className="font-medium line-clamp-1">{item.name}</p>
+                  <p className="text-xs text-gray-500">{item.desc}</p>
+                </div>
+                <div className="flex items-center space-x-1 my-2 sm:my-0">
+                  <button
+                    onClick={() => updateQuantity(item.id, -1)}
+                    className="border w-8 h-8 flex items-center justify-center rounded">
+                    <Minus size={15} />
+                  </button>
+                  <span>{item.quantity}</span>
+                  <button
+                    onClick={() => updateQuantity(item.id, 1)}
+                    className="border w-8 h-8 flex items-center justify-center rounded">
+                    <Plus size={15} />
+                  </button>
+                </div>
+                <div className="flex flex-col items-end ml-4 space-y-1">
+                  {/* <strong className="text-black-200 text-xl">${item.price}</strong> */}
+                  <button onClick={() => removeItem(item.id)}>
+                    <Trash2 size={14} className="text-red-600" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Discount */}
+          <div className="mt-6">
+            <label className="text-sm font-medium text-black mb-1 block">Discount Code</label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={discountCode}
+                onChange={(e) => setDiscountCode(e.target.value)}
+                className="flex-1 px-2 py-2 border border-gray-300 rounded-md"
+              />
+              <button
+                onClick={() =>
+                  Toastify({
+                    text: 'Invalid discount code',
+                    duration: 3000,
+                    backgroundColor: '#d32f2f',
+                  }).showToast()
+                }
+                className="px-4 py-2 border border-gray-300 rounded-md">
+                Apply
+              </button>
+            </div>
+          </div>
+
+          {/* Totals */}
+          <div className="mt-6 border-t pt-4 space-y-2 text-black">
+            <div className="flex justify-between text-sm"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
+            <div className="flex justify-between text-sm"><span>Tax</span><span>${tax}</span></div>
+            <div className="flex justify-between text-sm"><span>Shipping</span><span>${shipping}</span></div>
+            <div className="flex justify-between font-semibold text-lg pt-2 border-t"><span>Total</span><span>${total.toFixed(2)}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <Footer />
+      <ChatBot />
+    </div>
+  );
+}

@@ -24,3 +24,84 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* global.css or your main styles file */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.input {
+  @apply w-full border border-gray-300 px-4 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500;
+}
+.btn {
+  @apply bg-red-700 text-white px-6 py-2 rounded hover:bg-red-800 transition;
+}
+
+
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    @apply appearance-none bg-transparent border-0 outline-none;
+  }
+}
+
+@tailwind utilities;
+@tailwind utilities;
+
+@layer components {
+  .all-\[unset\] {
+    all: unset;
+  }
+}
+/* globals.css or tailwind.css */
+@media (max-width: 768px) {
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer components {
+  .input {
+    @apply w-full px-3 py-2 border border-gray-300 rounded bg-white text-black placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500;
+  }
+}
+.input-primary {
+  @apply border-2 border-gray-400 rounded-md px-4 py-2 text-gray-900 placeholder-gray-400
+    focus:outline-none focus:ring-2 focus:ring-[#8B1C1C] focus:border-[#8B1C1C]
+    transition-shadow shadow-sm hover:shadow-md bg-white;
+}
+
+.select-primary {
+  @apply border-2 border-gray-400 rounded-md px-4 py-2 text-gray-900 bg-white
+    focus:outline-none focus:ring-2 focus:ring-[#8B1C1C] focus:border-[#8B1C1C]
+    transition-shadow shadow-sm hover:shadow-md;
+}
+
+.btn-primary {
+  @apply 
+    bg-gradient-to-r from-[#8B1C1C] to-[#A42525] 
+    text-white 
+    px-8 py-3 
+    rounded-full 
+    font-bold 
+    tracking-wide 
+    shadow-lg 
+    transition 
+    transform 
+    hover:scale-105 
+    hover:shadow-2xl 
+    focus:outline-none 
+    focus:ring-4 
+    cursor-pointer
+    focus:ring-[#8B1C1C]/60;
+}
