@@ -20,30 +20,34 @@ import AdminSideBar from "../components/AdminSideBar";
 import { getCroppedImg } from "../utils/CropImage";
 import { API_BASE_URL } from "../../utils/api";
 
-// 🔐 Frontend key helper
+// 🔐 Frontend key helper (only for SAME-ORIGIN requests)
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
-const withFrontendKey = (init: RequestInit = {}): RequestInit => {
-  const headers = new Headers(init.headers || {});
-  headers.set("X-Frontend-Key", FRONTEND_KEY);
-  return { ...init, headers };
-};
 
-// ✅ Header-aware client downloader (no backend changes)
 const isSameOrigin = (url: string) => {
   try {
-    const u = new URL(url, API_BASE_URL);
-    const base = new URL(API_BASE_URL);
-    return u.origin === base.origin;
+    // Compare against the PAGE origin, not API_BASE_URL
+    const u = new URL(url, window.location.href);
+    return u.origin === window.location.origin;
   } catch {
     return false;
   }
 };
 
-// 🔧 Build filename: [imagea {alt text}].png  (strip risky chars, cap length)
+const withFrontendKeyIfSameOrigin = (
+  url: string,
+  init: RequestInit = {}
+): RequestInit => {
+  if (!isSameOrigin(url)) return init;
+  const headers = new Headers(init.headers || {});
+  headers.set("X-Frontend-Key", FRONTEND_KEY);
+  return { ...init, headers };
+};
+
+// 🔧 Build filename: [click2Print {alt text}].png
 const buildPngDownloadName = (alt?: string) => {
   const cleanAlt = (alt || "image")
-    .replace(/[\\/:*?"<>|]/g, "") // OS-problem characters
-    .replace(/[\[\]]/g, "") // avoid nested brackets
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/[\[\]]/g, "")
     .trim()
     .slice(0, 60);
   return `click2Print ${cleanAlt}.png`;
@@ -69,12 +73,26 @@ async function downloadImageClient(img: any) {
     const url = img.url?.startsWith("http")
       ? img.url
       : `${API_BASE_URL}${img.url}`;
-    const sameOrigin = isSameOrigin(url);
-    const init: RequestInit = sameOrigin ? withFrontendKey() : {};
 
-    const res = await fetch(url, { ...init, method: "GET", cache: "no-store" });
+    // ❗ Cross-origin: avoid fetch()->blob (needs ACAO). Open in a new tab instead.
+    if (!isSameOrigin(url)) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast.success("Opening image…");
+      return;
+    }
+
+    // Same-origin: safe to fetch and force download
+    const res = await fetch(
+      url,
+      withFrontendKeyIfSameOrigin(url, { method: "GET", cache: "no-store" })
+    );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
     const blob = await res.blob();
     const blobUrl = URL.createObjectURL(blob);
 
@@ -96,6 +114,7 @@ async function downloadImageClient(img: any) {
 
     toast.success("Download started");
   } catch (err) {
+    console.error(err);
     toast.error("Failed to download image");
   }
 }
@@ -142,9 +161,10 @@ const MediaLibraryPage = () => {
   useEffect(() => {
     const fetchImages = async () => {
       try {
+        const url = `${API_BASE_URL}/api/show-all-images/`;
         const res = await fetch(
-          `${API_BASE_URL}/api/show-all-images/`,
-          withFrontendKey()
+          url,
+          withFrontendKeyIfSameOrigin(url, { method: "GET" })
         );
         const data = await res.json();
         const updated = data.map((img: any) => ({
@@ -313,7 +333,6 @@ const MediaLibraryPage = () => {
         toast.success("Image updated!");
         setShowReplace(false);
         clearPendingReplace();
-        // ✅ also close the main image modal
         setModalImage(null);
       } else {
         toast.error("Failed to update image");
@@ -336,9 +355,10 @@ const MediaLibraryPage = () => {
       formData.append("alt_text", alt_text);
       formData.append("tags", JSON.stringify(tags));
 
+      const url = `${API_BASE_URL}/api/update-image/${imageId}/`;
       const res = await fetch(
-        `${API_BASE_URL}/api/update-image/${imageId}/`,
-        withFrontendKey({
+        url,
+        withFrontendKeyIfSameOrigin(url, {
           method: "POST",
           body: formData,
         })
@@ -359,16 +379,17 @@ const MediaLibraryPage = () => {
     }
   };
 
-  // 🔴 Delete helper (server API)
+  // 🔴 Delete helper (server API) — FormData to keep it "simple"
   const deleteImage = async (imageId: string) => {
     try {
+      const url = `${API_BASE_URL}/api/delete-image/`; // fixed missing slash
+      const fd = new FormData();
+      fd.append("image_id", imageId);
+
       const res = await fetch(
-        `${API_BASE_URL}api/delete-image/`,
-        withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image_id: imageId }),
-        })
+        url,
+        // no JSON content-type; no custom headers cross-origin
+        { method: "POST", body: fd }
       );
 
       if (!res.ok) {
@@ -451,9 +472,10 @@ const MediaLibraryPage = () => {
   // ---------- Metadata ----------
   const saveMetadata = async () => {
     try {
+      const url = `${API_BASE_URL}/api/edit-image`;
       const res = await fetch(
-        `${API_BASE_URL}/api/edit-image`,
-        withFrontendKey({
+        url,
+        withFrontendKeyIfSameOrigin(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -581,7 +603,7 @@ const MediaLibraryPage = () => {
                           <Eye className="w-6 h-6 bg-white rounded p-1" />
                         </button>
 
-                        {/* Header-aware client download */}
+                        {/* Header-aware client download with cross-origin fallback */}
                         <button
                           title="Download"
                           onClick={(e) => {
@@ -670,7 +692,6 @@ const MediaLibraryPage = () => {
 
                 <button
                   onClick={() => {
-                    // open replace modal and reset staged state
                     clearPendingReplace();
                     setReplaceMode("file");
                     setShowReplace(true);
@@ -680,7 +701,6 @@ const MediaLibraryPage = () => {
                   <Upload className="w-4 h-4" /> Replace Image
                 </button>
 
-                {/* Optional: keep this toggle visible in the edit modal too */}
                 <label className="flex items-center gap-2 mt-2">
                   <input
                     type="checkbox"
@@ -896,7 +916,7 @@ const MediaLibraryPage = () => {
                   </div>
                 )}
 
-                {/* Footer actions with Compress toggle next to Save */}
+                {/* Footer actions */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
                   <label className="inline-flex items-center gap-2">
                     <input
