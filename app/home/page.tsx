@@ -191,7 +191,7 @@ export default function PrintingServicePage() {
                     alt={category.name}
                     className="w-full h-auto object-cover rounded-lg"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/images/fallback.jpg";
+                      (e.target as HTMLImageElement).src = "/images/img1.jpg";
                     }}
                   />
                   <h3 className="mt-2 text-md font-semibold text-[#333] text-center">

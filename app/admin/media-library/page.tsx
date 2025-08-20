@@ -20,34 +20,29 @@ import AdminSideBar from "../components/AdminSideBar";
 import { getCroppedImg } from "../utils/CropImage";
 import { API_BASE_URL } from "../../utils/api";
 
-// 🔐 Frontend key helper (only for SAME-ORIGIN requests)
+// 🔐 Frontend key helper (used only for /api/* calls)
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
-
-const isSameOrigin = (url: string) => {
-  try {
-    // Compare against the PAGE origin, not API_BASE_URL
-    const u = new URL(url, window.location.href);
-    return u.origin === window.location.origin;
-  } catch {
-    return false;
-  }
-};
-
-const withFrontendKeyIfSameOrigin = (
-  url: string,
-  init: RequestInit = {}
-): RequestInit => {
-  if (!isSameOrigin(url)) return init;
+const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
   headers.set("X-Frontend-Key", FRONTEND_KEY);
   return { ...init, headers };
 };
 
-// 🔧 Build filename: [click2Print {alt text}].png
+// Only treat URLs under /api/ as API calls (attach headers there). Never for /media/*
+const isApiPath = (url: string) => {
+  try {
+    const u = new URL(url, API_BASE_URL);
+    return u.pathname.startsWith("/api/");
+  } catch {
+    return false;
+  }
+};
+
+// 🔧 Build filename: click2Print {alt}.png (strip risky chars, cap length)
 const buildPngDownloadName = (alt?: string) => {
   const cleanAlt = (alt || "image")
-    .replace(/[\\/:*?"<>|]/g, "")
-    .replace(/[\[\]]/g, "")
+    .replace(/[\\/:*?"<>|]/g, "") // OS-problem characters
+    .replace(/[\[\]]/g, "") // avoid nested brackets
     .trim()
     .slice(0, 60);
   return `click2Print ${cleanAlt}.png`;
@@ -70,51 +65,52 @@ async function downloadImageClient(img: any) {
       return;
     }
 
-    const url = img.url?.startsWith("http")
+    const absUrl = img.url?.startsWith("http")
       ? img.url
       : `${API_BASE_URL}${img.url}`;
+    const init: RequestInit = isApiPath(absUrl) ? withFrontendKey() : {};
 
-    // ❗ Cross-origin: avoid fetch()->blob (needs ACAO). Open in a new tab instead.
-    if (!isSameOrigin(url)) {
+    // Try CORS fetch -> blob -> download
+    try {
+      const res = await fetch(absUrl, {
+        ...init,
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
       const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
+      a.href = blobUrl;
+      a.download = buildPngDownloadName(
+        String(
+          img?.alt_text ||
+            img?.filename ||
+            img?.original_name ||
+            img?.image_id ||
+            img?.id
+        )
+      );
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast.success("Opening image…");
+      URL.revokeObjectURL(blobUrl);
+
+      toast.success("Download started");
+      return;
+    } catch {
+      // Fallback: direct anchor navigation (doesn't require CORS)
+      const a = document.createElement("a");
+      a.href = absUrl;
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast("Downloading…");
       return;
     }
-
-    // Same-origin: safe to fetch and force download
-    const res = await fetch(
-      url,
-      withFrontendKeyIfSameOrigin(url, { method: "GET", cache: "no-store" })
-    );
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    const blobUrl = URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = buildPngDownloadName(
-      String(
-        img?.alt_text ||
-          img?.filename ||
-          img?.original_name ||
-          img?.image_id ||
-          img?.id
-      )
-    );
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(blobUrl);
-
-    toast.success("Download started");
   } catch (err) {
-    console.error(err);
     toast.error("Failed to download image");
   }
 }
@@ -161,11 +157,11 @@ const MediaLibraryPage = () => {
   useEffect(() => {
     const fetchImages = async () => {
       try {
-        const url = `${API_BASE_URL}/api/show-all-images/`;
         const res = await fetch(
-          url,
-          withFrontendKeyIfSameOrigin(url, { method: "GET" })
+          `${API_BASE_URL}/api/show-all-images/`,
+          withFrontendKey()
         );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const updated = data.map((img: any) => ({
           ...img,
@@ -177,6 +173,7 @@ const MediaLibraryPage = () => {
         setImages(updated);
       } catch (error) {
         console.error("Failed to load images:", error);
+        toast.error("Failed to load images");
       }
     };
     fetchImages();
@@ -185,10 +182,10 @@ const MediaLibraryPage = () => {
   const groupedImages = useMemo(() => {
     const filtered = images.filter(
       (img) =>
-        img.alt_text?.toLowerCase().includes(search.toLowerCase()) ||
+        (img.alt_text || "").toLowerCase().includes(search.toLowerCase()) ||
         (Array.isArray(img.tags) &&
           img.tags?.some((tag: string) =>
-            tag.toLowerCase().includes(search.toLowerCase())
+            (tag || "").toLowerCase().includes(search.toLowerCase())
           ))
     );
 
@@ -355,10 +352,9 @@ const MediaLibraryPage = () => {
       formData.append("alt_text", alt_text);
       formData.append("tags", JSON.stringify(tags));
 
-      const url = `${API_BASE_URL}/api/update-image/${imageId}/`;
       const res = await fetch(
-        url,
-        withFrontendKeyIfSameOrigin(url, {
+        `${API_BASE_URL}/api/update-image/${imageId}/`,
+        withFrontendKey({
           method: "POST",
           body: formData,
         })
@@ -379,17 +375,16 @@ const MediaLibraryPage = () => {
     }
   };
 
-  // 🔴 Delete helper (server API) — FormData to keep it "simple"
+  // 🔴 Delete helper (server API)
   const deleteImage = async (imageId: string) => {
     try {
-      const url = `${API_BASE_URL}/api/delete-image/`; // fixed missing slash
-      const fd = new FormData();
-      fd.append("image_id", imageId);
-
       const res = await fetch(
-        url,
-        // no JSON content-type; no custom headers cross-origin
-        { method: "POST", body: fd }
+        `${API_BASE_URL}/api/delete-image/`,
+        withFrontendKey({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image_id: imageId }),
+        })
       );
 
       if (!res.ok) {
@@ -472,10 +467,9 @@ const MediaLibraryPage = () => {
   // ---------- Metadata ----------
   const saveMetadata = async () => {
     try {
-      const url = `${API_BASE_URL}/api/edit-image`;
       const res = await fetch(
-        url,
-        withFrontendKeyIfSameOrigin(url, {
+        `${API_BASE_URL}/api/edit-image/`,
+        withFrontendKey({
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -603,7 +597,7 @@ const MediaLibraryPage = () => {
                           <Eye className="w-6 h-6 bg-white rounded p-1" />
                         </button>
 
-                        {/* Header-aware client download with cross-origin fallback */}
+                        {/* Header-aware client download */}
                         <button
                           title="Download"
                           onClick={(e) => {
@@ -620,15 +614,17 @@ const MediaLibraryPage = () => {
                             e.stopPropagation();
                             if (!confirm("Delete this image?")) return;
 
+                            const keyLocal = img.image_id || img.id;
+
                             // local -> just remove
                             if (img.isLocal) {
                               setImages((prev) =>
                                 prev.filter(
-                                  (it) => (it.image_id || it.id) !== key
+                                  (it) => (it.image_id || it.id) !== keyLocal
                                 )
                               );
                               setSelectedImages((prev) =>
-                                prev.filter((id) => id !== key)
+                                prev.filter((id) => id !== keyLocal)
                               );
                               toast.success("Image deleted");
                               return;
@@ -642,11 +638,11 @@ const MediaLibraryPage = () => {
                             }
                             setImages((prev) =>
                               prev.filter(
-                                (it) => (it.image_id || it.id) !== key
+                                (it) => (it.image_id || it.id) !== keyLocal
                               )
                             );
                             setSelectedImages((prev) =>
-                              prev.filter((id) => id !== key)
+                              prev.filter((id) => id !== keyLocal)
                             );
                             toast.success("Image deleted");
                           }}
@@ -673,11 +669,7 @@ const MediaLibraryPage = () => {
                   />
                 </div>
                 <img
-                  src={
-                    modalImage.url?.startsWith("http")
-                      ? modalImage.url
-                      : `${API_BASE_URL}${modalImage.url}`
-                  }
+                  src={modalImage.url}
                   alt="Preview"
                   className="w-full rounded mb-2"
                   onError={(e) => (e.currentTarget.src = "/images/img1.jpg")}
@@ -692,6 +684,7 @@ const MediaLibraryPage = () => {
 
                 <button
                   onClick={() => {
+                    // open replace modal and reset staged state
                     clearPendingReplace();
                     setReplaceMode("file");
                     setShowReplace(true);
@@ -701,6 +694,7 @@ const MediaLibraryPage = () => {
                   <Upload className="w-4 h-4" /> Replace Image
                 </button>
 
+                {/* Optional: keep this toggle visible in the edit modal too */}
                 <label className="flex items-center gap-2 mt-2">
                   <input
                     type="checkbox"
@@ -916,7 +910,7 @@ const MediaLibraryPage = () => {
                   </div>
                 )}
 
-                {/* Footer actions */}
+                {/* Footer actions with Compress toggle next to Save */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
                   <label className="inline-flex items-center gap-2">
                     <input
