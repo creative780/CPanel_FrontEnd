@@ -5,6 +5,25 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "react-toastify";
 import { API_BASE_URL } from "../../utils/api";
 
+type AttributeOption = {
+  id: string;
+  label: string;
+  price_delta: number; // AED
+  is_default?: boolean;
+  // UI-only fields for handling file uploads:
+  _image_file?: File | null;
+  _image_preview?: string | null;
+  // Will be sent to backend as base64 (set on submit)
+  image?: string | null;
+};
+
+type CustomAttribute = {
+  id: string;
+  name: string;
+  // type removed — all act like "select"
+  options: AttributeOption[];
+};
+
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
 const MAX_IMAGES = 99;
 
@@ -14,10 +33,16 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-const addLowStockNotification = (productName: string, sku: string, quantity: number) => {
+const addLowStockNotification = (
+  productName: string,
+  sku: string,
+  quantity: number
+) => {
   if (typeof window === "undefined") return;
   const existing = JSON.parse(localStorage.getItem("notifications") || "[]");
-  const alreadyExists = existing.some((n: any) => n.type === "low_stock" && n.sku === sku);
+  const alreadyExists = existing.some(
+    (n: any) => n.type === "low_stock" && n.sku === sku
+  );
   if (alreadyExists) return;
   const newNotification = {
     id: crypto.randomUUID(),
@@ -29,10 +54,17 @@ const addLowStockNotification = (productName: string, sku: string, quantity: num
     message: `⚠️ Product "${productName}" (SKU: ${sku}) has low stock (${quantity} left)`,
     created_at: new Date().toISOString(),
   };
-  localStorage.setItem("notifications", JSON.stringify([newNotification, ...existing]));
+  localStorage.setItem(
+    "notifications",
+    JSON.stringify([newNotification, ...existing])
+  );
 };
 
-type ModalImage = { src: string; file?: File | null; kind: "file" | "url" | "data" };
+type ModalImage = {
+  src: string;
+  file?: File | null;
+  kind: "file" | "url" | "data";
+};
 
 const urlForDisplay = (src: string): string => {
   if (/^https?:/i.test(src)) return src;
@@ -89,6 +121,11 @@ const Modal = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
 
+  // Custom attributes state (type removed)
+  const [customAttributes, setCustomAttributes] = useState<CustomAttribute[]>(
+    []
+  );
+
   const openPreviewAt = useCallback(
     (idx: number) => {
       if (previewImages.length === 0) return;
@@ -103,7 +140,11 @@ const Modal = ({
     setActivePreviewIndex((i) => (i + 1) % Math.max(previewImages.length, 1));
   }, [previewImages.length]);
   const prevPreview = useCallback(() => {
-    setActivePreviewIndex((i) => (i - 1 + Math.max(previewImages.length, 1)) % Math.max(previewImages.length, 1));
+    setActivePreviewIndex(
+      (i) =>
+        (i - 1 + Math.max(previewImages.length, 1)) %
+        Math.max(previewImages.length, 1)
+    );
   }, [previewImages.length]);
 
   useEffect(() => {
@@ -179,14 +220,18 @@ const Modal = ({
 
   const categoryName = useMemo(() => {
     if (!formData.category) return "";
-    const found = categories.find((c) => c.id?.toString() === formData.category?.toString());
+    const found = categories.find(
+      (c) => c.id?.toString() === formData.category?.toString()
+    );
     return found?.name || "";
   }, [categories, formData.category]);
 
   const subcategoryName = useMemo(() => {
     const subId = formData.subcategory || selectedSubcategories?.[0];
     if (!subId) return "";
-    const found = subcategories.find((s) => s.id?.toString() === subId?.toString());
+    const found = subcategories.find(
+      (s) => s.id?.toString() === subId?.toString()
+    );
     return found?.name || "";
   }, [subcategories, formData.subcategory, selectedSubcategories]);
 
@@ -239,48 +284,69 @@ const Modal = ({
       setPreviewImages([]);
       setSelectedCategories([]);
       setSelectedSubcategories([]);
+      setCustomAttributes([]); // reset
       return;
     }
     const fetchDetails = async () => {
       try {
-        const [basicRes, seoRes, variantRes, shipRes, otherRes, comboRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/show_specific_product/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-          fetch(`${API_BASE_URL}/api/show_product_seo/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-          fetch(`${API_BASE_URL}/api/show_product_variant/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-          fetch(`${API_BASE_URL}/api/show_product_shipping_info/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-          fetch(`${API_BASE_URL}/api/show_product_other_details/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-          fetch(`${API_BASE_URL}/api/show_product_variants/`, withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ product_id: productId }),
-          })),
-        ]);
+        const [basicRes, seoRes, variantRes, shipRes, otherRes, comboRes] =
+          await Promise.all([
+            fetch(
+              `${API_BASE_URL}/api/show_specific_product/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+            fetch(
+              `${API_BASE_URL}/api/show_product_seo/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+            fetch(
+              `${API_BASE_URL}/api/show_product_variant/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+            fetch(
+              `${API_BASE_URL}/api/show_product_shipping_info/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+            fetch(
+              `${API_BASE_URL}/api/show_product_other_details/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+            fetch(
+              `${API_BASE_URL}/api/show_product_variants/`,
+              withFrontendKey({
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ product_id: productId }),
+              })
+            ),
+          ]);
         const basic = await basicRes.json();
         const seo = await seoRes.json();
         const variant = await variantRes.json();
         const shipping = await shipRes.json();
         const other = await otherRes.json();
         const combos = await comboRes.json();
+
         setFormData((prev: any) => ({
           ...prev,
           title: basic.name || "",
@@ -318,15 +384,74 @@ const Modal = ({
           processingTime: shipping.processing_time || "",
           shippingClass: (shipping.shipping_class || "").split(","),
         }));
-        const existingArray = Array.isArray(other.images) ? other.images : other.images ? [other.images] : [];
+
+        // images preview
+        const existingArray = Array.isArray(other.images)
+          ? other.images
+          : other.images
+          ? [other.images]
+          : [];
         const displayUrls = existingArray.map((p: string) => urlForDisplay(p));
         let filteredDisplay = displayUrls;
         if (displayUrls.length > 0) {
-          const lastDir = dirKeyFromDisplayUrl(displayUrls[displayUrls.length - 1]);
-          filteredDisplay = displayUrls.filter((u) => dirKeyFromDisplayUrl(u) === lastDir);
+          const lastDir = dirKeyFromDisplayUrl(
+            displayUrls[displayUrls.length - 1]
+          );
+          filteredDisplay = displayUrls.filter(
+            (u) => dirKeyFromDisplayUrl(u) === lastDir
+          );
         }
-        setPreviewImages(filteredDisplay.map((p: string) => ({ src: p, kind: "url" as const, file: null })));
-        if (other.subcategory_ids?.length > 0) setSelectedSubcategories(other.subcategory_ids);
+        setPreviewImages(
+          filteredDisplay.map((p: string) => ({
+            src: p,
+            kind: "url" as const,
+            file: null,
+          }))
+        );
+        if (other.subcategory_ids?.length > 0)
+          setSelectedSubcategories(other.subcategory_ids);
+
+        // Prefill custom attributes (type removed)
+        if (Array.isArray(other.custom_attributes)) {
+          const normalized: CustomAttribute[] = other.custom_attributes.map(
+            (a: any) => ({
+              id: crypto.randomUUID(),
+              name: String(a?.name || ""),
+              options: Array.isArray(a?.options)
+                ? a.options.map((o: any) => {
+                    const maybeUrl =
+                      typeof o?.image === "string" &&
+                      o.image.startsWith("http");
+                    return {
+                      id: crypto.randomUUID(),
+                      label: String(o?.label || ""),
+                      price_delta: Number(o?.price_delta) || 0,
+                      is_default: !!o?.is_default,
+                      _image_file: null,
+                      _image_preview: maybeUrl ? o.image : null,
+                      image:
+                        !maybeUrl && typeof o?.image === "string"
+                          ? o.image
+                          : null,
+                    } as AttributeOption;
+                  })
+                : [
+                    {
+                      id: crypto.randomUUID(),
+                      label: "",
+                      price_delta: 0,
+                      is_default: true,
+                      _image_file: null,
+                      _image_preview: null,
+                      image: null,
+                    },
+                  ],
+            })
+          );
+          setCustomAttributes(normalized);
+        } else {
+          setCustomAttributes([]);
+        }
       } catch (err) {
         toast.error("❌ Failed to load product details");
         console.error("Fetch product detail error:", err);
@@ -354,7 +479,9 @@ const Modal = ({
     };
     if (!FRONTEND_KEY) {
       console.warn("NEXT_PUBLIC_FRONTEND_KEY missing.");
-      toast.warn("Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart.");
+      toast.warn(
+        "Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart."
+      );
       return;
     }
     fetchData();
@@ -364,7 +491,9 @@ const Modal = ({
 
   useEffect(() => {
     if (formData.subcategory && !formData.category) {
-      const selectedSub = subcategories.find((s) => s.id.toString() === formData.subcategory.toString());
+      const selectedSub = subcategories.find(
+        (s) => s.id.toString() === formData.subcategory.toString()
+      );
       if (selectedSub && selectedSub.categories?.length > 0) {
         const firstName = selectedSub.categories[0];
         const match = categories.find((c) => c.name === firstName);
@@ -393,13 +522,20 @@ const Modal = ({
     const generateSku = async () => {
       if (!formData.title.trim() || !formData.subcategory || isEditMode) return;
       try {
-        const res = await fetch(`${API_BASE_URL}/api/generate-product-id/`, withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: formData.title, subcategory_id: formData.subcategory }),
-        }));
+        const res = await fetch(
+          `${API_BASE_URL}/api/generate-product-id/`,
+          withFrontendKey({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: formData.title,
+              subcategory_id: formData.subcategory,
+            }),
+          })
+        );
         const data = await res.json();
-        if (res.ok && data?.product_id) setFormData((prev: any) => ({ ...prev, sku: data.product_id }));
+        if (res.ok && data?.product_id)
+          setFormData((prev: any) => ({ ...prev, sku: data.product_id }));
       } catch (err) {
         console.error("Failed to generate product ID:", err);
       }
@@ -412,7 +548,8 @@ const Modal = ({
   useEffect(() => {
     return () => {
       previewImages.forEach((img) => {
-        if (img.kind === "file" && (img.src as any)?.startsWith?.("blob:")) URL.revokeObjectURL(img.src);
+        if (img.kind === "file" && (img.src as any)?.startsWith?.("blob:"))
+          URL.revokeObjectURL(img.src);
       });
     };
   }, [previewImages]);
@@ -422,9 +559,12 @@ const Modal = ({
   const validate = () => {
     const newErrors: any = {};
     if (!formData.title.trim()) newErrors.title = "Product title is required";
-    if (!formData.description.trim()) newErrors.description = "Description is required";
-    if (!formData.subcategory) newErrors.subcategory = "Subcategory is required";
-    if (!isEditMode && previewImages.length === 0) newErrors.image = "At least one image is required";
+    if (!formData.description.trim())
+      newErrors.description = "Description is required";
+    if (!formData.subcategory)
+      newErrors.subcategory = "Subcategory is required";
+    if (!isEditMode && previewImages.length === 0)
+      newErrors.image = "At least one image is required";
     return newErrors;
   };
 
@@ -440,7 +580,11 @@ const Modal = ({
     const allowed = Math.max(0, MAX_IMAGES - currentCount);
     const chosen = files.slice(0, allowed);
     if (files.length > allowed) {
-      toast.warn(`You can upload up to ${MAX_IMAGES} images. Extra ${files.length - allowed} file(s) ignored.`);
+      toast.warn(
+        `You can upload up to ${MAX_IMAGES} images. Extra ${
+          files.length - allowed
+        } file(s) ignored.`
+      );
     }
     const items: ModalImage[] = chosen.map((file) => ({
       src: URL.createObjectURL(file),
@@ -455,14 +599,18 @@ const Modal = ({
       const { image, ...rest } = prev;
       return rest;
     });
-    e.target.value = "";
+    (e.target as any).value = "";
   };
 
   const removeImageAt = (idx: number) => {
     setPreviewImages((prev) => {
       const copy = [...prev];
       const [removed] = copy.splice(idx, 1);
-      if (removed?.kind === "file" && (removed.src as any)?.startsWith?.("blob:")) URL.revokeObjectURL(removed.src);
+      if (
+        removed?.kind === "file" &&
+        (removed.src as any)?.startsWith?.("blob:")
+      )
+        URL.revokeObjectURL(removed.src);
       if (isPreviewOpen) {
         if (idx === activePreviewIndex) {
           setActivePreviewIndex((i) => Math.max(0, i - 1));
@@ -475,11 +623,15 @@ const Modal = ({
   };
 
   const handleCategoryChange = (id: any) => {
-    setSelectedCategories((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
+    setSelectedCategories((prev) =>
+      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+    );
   };
 
   const handleSubcategoryChange = (id: any, linkedCategories?: string[]) => {
-    setSelectedSubcategories((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+    setSelectedSubcategories((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    );
     if (selectedCategories.length === 0 && linkedCategories?.length) {
       const matchedIds = linkedCategories
         .map((catName) => categories.find((c) => c.name === catName)?.id)
@@ -500,6 +652,127 @@ const Modal = ({
           )
         );
 
+  // ======= Custom Attributes helpers (type removed) =======
+  const addAttribute = () => {
+    setCustomAttributes((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        name: "",
+        options: [
+          {
+            id: crypto.randomUUID(),
+            label: "",
+            price_delta: 0,
+            is_default: true,
+            _image_file: null,
+            _image_preview: null,
+            image: null,
+          },
+        ],
+      },
+    ]);
+  };
+
+  const removeAttribute = (attrId: string) => {
+    setCustomAttributes((prev) => prev.filter((a) => a.id !== attrId));
+  };
+
+  const updateAttribute = (attrId: string, patch: Partial<CustomAttribute>) => {
+    setCustomAttributes((prev) =>
+      prev.map((a) => (a.id === attrId ? { ...a, ...patch } : a))
+    );
+  };
+
+  const addOption = (attrId: string) => {
+    setCustomAttributes((prev) =>
+      prev.map((a) =>
+        a.id === attrId
+          ? {
+              ...a,
+              options: [
+                ...a.options,
+                {
+                  id: crypto.randomUUID(),
+                  label: "",
+                  price_delta: 0,
+                  is_default: false,
+                  _image_file: null,
+                  _image_preview: null,
+                  image: null,
+                },
+              ],
+            }
+          : a
+      )
+    );
+  };
+
+  const removeOption = (attrId: string, optId: string) => {
+    setCustomAttributes((prev) =>
+      prev.map((a) =>
+        a.id === attrId
+          ? { ...a, options: a.options.filter((o) => o.id !== optId) }
+          : a
+      )
+    );
+  };
+
+  const updateOption = (
+    attrId: string,
+    optId: string,
+    patch: Partial<AttributeOption>
+  ) => {
+    setCustomAttributes((prev) =>
+      prev.map((a) =>
+        a.id === attrId
+          ? {
+              ...a,
+              options: a.options.map((o) =>
+                o.id === optId ? { ...o, ...patch } : o
+              ),
+            }
+          : a
+      )
+    );
+  };
+
+  // When setting default: mark selected as default AND force price_delta to 0, others lose default (keep their price values)
+  const setDefaultOption = (attrId: string, optId: string) => {
+    setCustomAttributes((prev) =>
+      prev.map((a) =>
+        a.id === attrId
+          ? {
+              ...a,
+              options: a.options.map((o) =>
+                o.id === optId
+                  ? { ...o, is_default: true, price_delta: 0 }
+                  : { ...o, is_default: false }
+              ),
+            }
+          : a
+      )
+    );
+  };
+
+  const handleOptionImageChange = (
+    attrId: string,
+    optId: string,
+    file: File | null
+  ) => {
+    if (!file) {
+      // clear
+      return updateOption(attrId, optId, {
+        _image_file: null,
+        _image_preview: null,
+        image: null,
+      });
+    }
+    const preview = URL.createObjectURL(file);
+    updateOption(attrId, optId, { _image_file: file, _image_preview: preview });
+  };
+  // ========================================================
+
   const handleSubmit = async (e: any) => {
     e.preventDefault();
     const formErrors = validate();
@@ -508,7 +781,11 @@ const Modal = ({
       toast.error("Please correct the highlighted fields.");
       return;
     }
-    const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
+    const finalSubcategoryIds = [
+      ...new Set(
+        [...selectedSubcategories, formData.subcategory].filter(Boolean)
+      ),
+    ];
     if (finalSubcategoryIds.length === 0) {
       toast.error("Please select at least one subcategory.");
       return;
@@ -529,10 +806,16 @@ const Modal = ({
       }
       if (isEditMode && imagesBase64.length === 0) {
         toast.dismiss(toastId);
-        toast.error("Could not preserve existing images. Please reselect images before saving.");
+        toast.error(
+          "Could not preserve existing images. Please reselect images before saving."
+        );
         return;
       }
-      const cleanCommaArray = (val: string) => val.split(",").map((v) => v.trim()).filter(Boolean);
+      const cleanCommaArray = (val: string) =>
+        val
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
       const parsedCombinations = String(tempVariantCombinations || "")
         .split("|")
         .map((entry) => entry.trim())
@@ -541,6 +824,32 @@ const Modal = ({
           const [description, price] = entry.split("::").map((v) => v.trim());
           return { description, price_override: parseFloat(price) || 0 };
         });
+
+      // Convert each attribute option image file to base64 (if any)
+      const attrsForPayload = [];
+      for (const a of customAttributes) {
+        const opts: any[] = [];
+        for (const o of a.options) {
+          let imageBase64 = o.image || null;
+          if (o._image_file) {
+            imageBase64 = await fileToBase64(o._image_file);
+          }
+          opts.push({
+            label: o.label,
+            price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
+            is_default: !!o.is_default,
+            image: imageBase64, // base64 or null
+          });
+        }
+        // enforce single default if none selected
+        if (opts.length > 0 && !opts.some((x) => x.is_default)) {
+          // make first one default and zero price
+          opts[0].is_default = true;
+          opts[0].price_delta = 0;
+        }
+        attrsForPayload.push({ name: a.name, options: opts });
+      }
+
       const payload: any = {
         name: formData.title,
         description: formData.description,
@@ -548,7 +857,8 @@ const Modal = ({
         price: parseFloat(formData.normalPrice) || 0,
         discounted_price: parseFloat(formData.discountedPrice) || 0,
         tax_rate: parseFloat(formData.taxRate) || 0,
-        price_calculator: formData.priceCalculator,
+        price_calculator:
+          (formData as any).price_calculator ?? formData.priceCalculator,
         video_url: formData.videoUrl,
         fabric_finish: formData.fabricFinish,
         status: "active",
@@ -577,12 +887,19 @@ const Modal = ({
         addOnOptions: cleanCommaArray(tempAddOnOptions),
         customTags: cleanCommaArray(tempCustomTags),
         groupedFilters: cleanCommaArray(tempGroupedFilters),
+
+        // attributes with option images
+        custom_attributes: attrsForPayload,
       };
-      const res = await fetch(`${API_BASE_URL}/api/save-product/`, withFrontendKey({
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }));
+
+      const res = await fetch(
+        `${API_BASE_URL}/api/save-product/`,
+        withFrontendKey({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      );
       let result: any = {};
       try {
         result = await res.json();
@@ -590,8 +907,15 @@ const Modal = ({
       toast.dismiss(toastId);
       if (res.ok) {
         toast.success("Product saved successfully!");
-        if (payload.quantity <= payload.low_stock_alert && payload.quantity > 0) {
-          addLowStockNotification(payload.name, payload.subcategory_ids[0], payload.quantity);
+        if (
+          payload.quantity <= payload.low_stock_alert &&
+          payload.quantity > 0
+        ) {
+          addLowStockNotification(
+            payload.name,
+            payload.subcategory_ids[0],
+            payload.quantity
+          );
         }
         onClose?.();
       } else {
@@ -611,18 +935,19 @@ const Modal = ({
       style={{ backdropFilter: "blur(8px)" }}
     >
       <div
-        className="bg-white text-gray-900 rounded-xl shadow-2xl max-w-5xl w-full max-h-[80vh] overflow-y-auto p-8 flex flex-col sm:flex-row"
+        className="bg-white text-gray-900 rounded-xl shadow-2xl max-w-5xl w-full max-h-[80vh] overflow-y-auto p-6 sm:p-8 flex flex-col sm:flex-row"
         role="dialog"
         aria-modal="true"
       >
-        <div className="hidden sm:block sm:w-1/2 pr-6 h-[420px]">
+        {/* Left: gallery */}
+        <div className="hidden sm:block sm:w-1/2 pr-0 sm:pr-6 h-[420px] shrink-0">
           {previewImages.length > 0 ? (
             <div className="space-y-3">
-              <div className="aspect-video w-full overflow-hidden rounded-lg shadow-lg w-full h-[420px]">
+              <div className="aspect-video w-full overflow-hidden rounded-lg shadow-lg h-[280px]">
                 <img
                   src={previewImages[0].src}
                   alt="Product Preview"
-                  className="w-auto h-full object-cover cursor-zoom-in"
+                  className="w-full h-full object-cover cursor-zoom-in"
                   onClick={() => openPreviewAt(0)}
                 />
               </div>
@@ -653,11 +978,15 @@ const Modal = ({
             </div>
           )}
           {errors.image && <p className="text-red-600 mt-2">{errors.image}</p>}
-          <p className="text-xs text-gray-500 mt-2">You can upload up to {MAX_IMAGES} images.</p>
+          <p className="text-xs text-gray-500 mt-2">
+            You can upload up to {MAX_IMAGES} images.
+          </p>
         </div>
+
+        {/* Right: form */}
         <div className="w-full sm:w-1/2 h-full overflow-y-auto">
-          <header className="flex justify-between items-center border-b border-gray-300 pb-3 mb-6">
-            <h2 className="text-2xl font-extrabold tracking-wide text-[#8B1C1C]">
+          <header className="flex justify-between items-center border-b border-gray-300 pb-3 mb-6 sticky top-0 bg-white z-10">
+            <h2 className="text-xl sm:text-2xl font-extrabold tracking-wide text-[#8B1C1C]">
               {isEditMode ? "View / Edit Product" : "Add Product"}
             </h2>
             <button
@@ -668,30 +997,46 @@ const Modal = ({
               ×
             </button>
           </header>
+
           <form className="space-y-8" onSubmit={handleSubmit} noValidate>
+            {/* Basic Info */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Basic Info</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Basic Info
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                 <input
                   name="title"
                   type="text"
                   placeholder="Product Title"
-                  className={`input-primary ${errors.title ? "border-red-600" : ""}`}
+                  className={`input-primary ${
+                    errors.title ? "border-red-600" : ""
+                  }`}
                   value={formData.title}
                   disabled={isEditMode}
                   onChange={handleChange}
                   required
                 />
-                {errors.title && <p className="text-red-600">{errors.title}</p>}
+                {errors.title && (
+                  <p className="text-red-600 sm:col-span-2">{errors.title}</p>
+                )}
+
                 <textarea
                   name="description"
                   placeholder="Description (Rich Text)"
-                  className={`input-primary col-span-1 sm:col-span-2 h-24 resize-y ${errors.description ? "border-red-600" : ""}`}
+                  className={`input-primary col-span-1 sm:col-span-2 h-24 resize-y ${
+                    errors.description ? "border-red-600" : ""
+                  }`}
                   value={formData.description}
                   onChange={handleChange}
                   required
                 />
-                {errors.description && <p className="text-red-600">{errors.description}</p>}
+                {errors.description && (
+                  <p className="text-red-600 sm:col-span-2">
+                    {errors.description}
+                  </p>
+                )}
+
                 <input
                   name="sku"
                   type="text"
@@ -701,16 +1046,23 @@ const Modal = ({
                   onChange={handleChange}
                   disabled={isEditMode}
                 />
+
                 {!isEditMode ? (
                   <>
                     <div className="relative">
                       <select
                         name="category"
-                        className={`input-primary w-full pr-10 ${errors.category ? "border-red-600" : ""} custom-select`}
+                        className={`input-primary w-full pr-10 ${
+                          errors.category ? "border-red-600" : ""
+                        } custom-select`}
                         value={formData.category}
                         onChange={(e) => {
                           const selectedId = e.target.value;
-                          setFormData((prev: any) => ({ ...prev, category: selectedId, subcategory: "" }));
+                          setFormData((prev: any) => ({
+                            ...prev,
+                            category: selectedId,
+                            subcategory: "",
+                          }));
                           setSelectedCategories([selectedId]);
                         }}
                       >
@@ -728,25 +1080,48 @@ const Modal = ({
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
                       </svg>
                     </div>
+
                     <div className="relative">
                       <select
                         name="subcategory"
-                        className={`input-primary w-full pr-10 ${errors.subcategory ? "border-red-600" : ""} custom-select`}
+                        className={`input-primary w-full pr-10 ${
+                          errors.subcategory ? "border-red-600" : ""
+                        } custom-select`}
                         value={formData.subcategory}
                         onChange={(e) => {
                           const subId = e.target.value;
-                          setFormData((prev: any) => ({ ...prev, subcategory: subId }));
+                          setFormData((prev: any) => ({
+                            ...prev,
+                            subcategory: subId,
+                          }));
                           if (!formData.category) {
-                            const selectedSub = subcategories.find((s) => s.id?.toString() === subId?.toString());
-                            if (selectedSub && selectedSub.categories?.length > 0) {
+                            const selectedSub = subcategories.find(
+                              (s) => s.id?.toString() === subId?.toString()
+                            );
+                            if (
+                              selectedSub &&
+                              selectedSub.categories?.length > 0
+                            ) {
                               const matchedCatIds = selectedSub.categories
-                                .map((catName: string) => categories.find((c) => c.name === catName)?.id)
+                                .map(
+                                  (catName: string) =>
+                                    categories.find((c) => c.name === catName)
+                                      ?.id
+                                )
                                 .filter(Boolean);
                               setSelectedCategories(matchedCatIds);
-                              setFormData((prev: any) => ({ ...prev, category: matchedCatIds[0] || "" }));
+                              setFormData((prev: any) => ({
+                                ...prev,
+                                category: matchedCatIds[0] || "",
+                              }));
                             }
                           }
                         }}
@@ -766,7 +1141,12 @@ const Modal = ({
                         viewBox="0 0 24 24"
                         stroke="currentColor"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 9l-7 7-7-7"
+                        />
                       </svg>
                     </div>
                   </>
@@ -788,24 +1168,41 @@ const Modal = ({
                     />
                   </>
                 )}
-                {errors.subcategory && <p className="text-red-600">{errors.subcategory}</p>}
+
+                {errors.subcategory && (
+                  <p className="text-red-600 sm:col-span-2">
+                    {errors.subcategory}
+                  </p>
+                )}
+
                 <input
                   name="brand"
                   type="text"
                   placeholder="Brand / Vendor"
-                  className={`input-primary ${errors.brand ? "border-red-600" : ""}`}
+                  className={`input-primary ${
+                    errors.brand ? "border-red-600" : ""
+                  }`}
                   value={formData.brand}
                   onChange={handleChange}
                   required
                 />
-                {errors.brand && <p className="text-red-600">{errors.brand}</p>}
+                {errors.brand && (
+                  <p className="text-red-600 sm:col-span-2">{errors.brand}</p>
+                )}
               </div>
             </section>
+
+            {/* Images & Media */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Images & Media</h3>
-              <div className="grid gap-6">
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Images & Media
+              </h3>
+              <div className="grid gap-4 sm:gap-6">
                 <div>
-                  <label htmlFor="file-upload" className="btn-primary inline-block cursor-pointer text-center">
+                  <label
+                    htmlFor="file-upload"
+                    className="btn-primary inline-block cursor-pointer text-center"
+                  >
                     Choose Image(s)
                   </label>
                   <input
@@ -821,11 +1218,15 @@ const Modal = ({
                   name="imageAlt"
                   type="text"
                   placeholder="Image alt text for SEO"
-                  className={`input-primary ${errors.imageAlt ? "border-red-600" : ""}`}
+                  className={`input-primary ${
+                    errors.imageAlt ? "border-red-600" : ""
+                  }`}
                   value={formData.imageAlt}
                   onChange={handleChange}
                 />
-                {errors.imageAlt && <p className="text-red-600">{errors.imageAlt}</p>}
+                {errors.imageAlt && (
+                  <p className="text-red-600">{errors.imageAlt}</p>
+                )}
                 <input
                   name="videoUrl"
                   type="url"
@@ -836,45 +1237,196 @@ const Modal = ({
                 />
               </div>
             </section>
+
+            {/* SEO & Metadata */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">SEO & Metadata</h3>
-              <div className="grid grid-cols-1 gap-6">
-                <input name="metaTitle" type="text" placeholder="Meta Title" className="input-primary" value={formData.metaTitle} onChange={handleChange} />
-                <textarea name="metaDescription" placeholder="Meta Description" className="input-primary h-20 resize-y" value={formData.metaDescription} onChange={handleChange} />
-                <input name="metaKeywords" type="text" placeholder="Meta Keywords (comma-separated)" className="input-primary" value={tempMetaKeywords} onChange={(e) => setTempMetaKeywords(e.target.value)} />
-                <input name="ogTitle" type="text" placeholder="Open Graph Title" className="input-primary" value={formData.ogTitle} onChange={handleChange} />
-                <textarea name="ogDescription" placeholder="Open Graph Description" className="input-primary h-20 resize-y" value={formData.ogDescription} onChange={handleChange} />
-                <input name="ogImage" type="url" placeholder="Open Graph Image URL" className="input-primary" value={formData.ogImage} onChange={handleChange} />
-                <input name="canonicalUrl" type="url" placeholder="Canonical URL" className="input-primary" value={formData.canonicalUrl} onChange={handleChange} />
-                <textarea name="jsonLdSchema" placeholder="JSON-LD Schema (Structured Data)" className="input-primary h-24 resize-y font-mono text-sm" value={formData.jsonLdSchema} onChange={handleChange} />
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                SEO & Metadata
+              </h3>
+              <div className="grid grid-cols-1 gap-4 sm:gap-6">
+                <input
+                  name="metaTitle"
+                  type="text"
+                  placeholder="Meta Title"
+                  className="input-primary"
+                  value={formData.metaTitle}
+                  onChange={handleChange}
+                />
+                <textarea
+                  name="metaDescription"
+                  placeholder="Meta Description"
+                  className="input-primary h-20 resize-y"
+                  value={formData.metaDescription}
+                  onChange={handleChange}
+                />
+                <input
+                  name="metaKeywords"
+                  type="text"
+                  placeholder="Meta Keywords (comma-separated)"
+                  className="input-primary"
+                  value={tempMetaKeywords}
+                  onChange={(e) => setTempMetaKeywords(e.target.value)}
+                />
+                <input
+                  name="ogTitle"
+                  type="text"
+                  placeholder="Open Graph Title"
+                  className="input-primary"
+                  value={formData.ogTitle}
+                  onChange={handleChange}
+                />
+                <textarea
+                  name="ogDescription"
+                  placeholder="Open Graph Description"
+                  className="input-primary h-20 resize-y"
+                  value={formData.ogDescription}
+                  onChange={handleChange}
+                />
+                <input
+                  name="ogImage"
+                  type="url"
+                  placeholder="Open Graph Image URL"
+                  className="input-primary"
+                  value={formData.ogImage}
+                  onChange={handleChange}
+                />
+                <input
+                  name="canonicalUrl"
+                  type="url"
+                  placeholder="Canonical URL"
+                  className="input-primary"
+                  value={formData.canonicalUrl}
+                  onChange={handleChange}
+                />
+                <textarea
+                  name="jsonLdSchema"
+                  placeholder="JSON-LD Schema (Structured Data)"
+                  className="input-primary h-24 resize-y font-mono text-sm"
+                  value={formData.jsonLdSchema}
+                  onChange={handleChange}
+                />
               </div>
             </section>
+
+            {/* Pricing */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Pricing</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <input name="normalPrice" type="number" placeholder="Normal Price" className="input-primary" value={formData.normalPrice} onChange={handleChange} />
-                <input name="discountedPrice" type="number" placeholder="Discounted Price" className="input-primary" value={formData.discountedPrice} onChange={handleChange} />
-                <input name="taxRate" type="number" placeholder="Tax Rate (%)" className="input-primary" value={formData.taxRate} onChange={handleChange} />
-                <input name="priceCalculator" type="text" placeholder="Price Calculator" className="input-primary" value={formData.priceCalculator} onChange={handleChange} />
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Pricing
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <input
+                  name="normalPrice"
+                  type="number"
+                  placeholder="Normal Price"
+                  className="input-primary"
+                  value={formData.normalPrice}
+                  onChange={handleChange}
+                />
+                <input
+                  name="discountedPrice"
+                  type="number"
+                  placeholder="Discounted Price"
+                  className="input-primary"
+                  value={formData.discountedPrice}
+                  onChange={handleChange}
+                />
+                <input
+                  name="taxRate"
+                  type="number"
+                  placeholder="Tax Rate (%)"
+                  className="input-primary"
+                  value={formData.taxRate}
+                  onChange={handleChange}
+                />
+                <input
+                  name="priceCalculator"
+                  type="text"
+                  placeholder="Price Calculator"
+                  className="input-primary"
+                  value={formData.priceCalculator}
+                  onChange={handleChange}
+                />
               </div>
             </section>
+
+            {/* Inventory */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Inventory</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <input name="stockQuantity" type="number" placeholder="Stock Quantity" className="input-primary" value={formData.stockQuantity} onChange={handleChange} />
-                <input name="lowStockAlert" type="number" placeholder="Low Stock Alert" className="input-primary" value={formData.lowStockAlert} onChange={handleChange} />
-                <input name="stockStatus" type="text" placeholder="Stock Status (in stock/out of stock)" className="input-primary" value={formData.stockStatus} onChange={handleChange} />
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Inventory
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                <input
+                  name="stockQuantity"
+                  type="number"
+                  placeholder="Stock Quantity"
+                  className="input-primary"
+                  value={formData.stockQuantity}
+                  onChange={handleChange}
+                />
+                <input
+                  name="lowStockAlert"
+                  type="number"
+                  placeholder="Low Stock Alert"
+                  className="input-primary"
+                  value={formData.lowStockAlert}
+                  onChange={handleChange}
+                />
+                <input
+                  name="stockStatus"
+                  type="text"
+                  placeholder="Stock Status (in stock/out of stock)"
+                  className="input-primary"
+                  value={formData.stockStatus}
+                  onChange={handleChange}
+                />
               </div>
             </section>
+
+            {/* Product Variations */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Product Variations</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <input name="size" type="text" placeholder="Enter sizes (comma-separated)" className="input-primary" value={tempSizes} onChange={(e) => setTempSizes(e.target.value)} />
-                <input name="colorVariants" type="text" placeholder="Enter color variants (comma-separated)" className="input-primary" value={tempColorVariants} onChange={(e) => setTempColorVariants(e.target.value)} />
-                <input name="materialType" type="text" placeholder="Enter material types (comma-separated)" className="input-primary" value={tempMaterialType} onChange={(e) => setTempMaterialType(e.target.value)} />
-                <input name="fabricFinish" type="text" placeholder="Fabric Finish" className="input-primary" value={formData.fabricFinish} onChange={handleChange} />
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Product Variations
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <input
+                  name="size"
+                  type="text"
+                  placeholder="Enter sizes (comma-separated)"
+                  className="input-primary"
+                  value={tempSizes}
+                  onChange={(e) => setTempSizes(e.target.value)}
+                />
+                <input
+                  name="colorVariants"
+                  type="text"
+                  placeholder="Enter color variants (comma-separated)"
+                  className="input-primary"
+                  value={tempColorVariants}
+                  onChange={(e) => setTempColorVariants(e.target.value)}
+                />
+                <input
+                  name="materialType"
+                  type="text"
+                  placeholder="Enter material types (comma-separated)"
+                  className="input-primary"
+                  value={tempMaterialType}
+                  onChange={(e) => setTempMaterialType(e.target.value)}
+                />
+                <input
+                  name="fabricFinish"
+                  type="text"
+                  placeholder="Fabric Finish"
+                  className="input-primary"
+                  value={formData.fabricFinish}
+                  onChange={handleChange}
+                />
                 <div className="relative">
-                  <select name="printingMethod" className="input-primary w-full pr-10 custom-select" value={formData.printingMethod} onChange={handleChange}>
+                  <select
+                    name="printingMethod"
+                    className="input-primary w-full pr-10 custom-select"
+                    value={formData.printingMethod}
+                    onChange={handleChange}
+                  >
                     <option value="">Select Printing Method</option>
                     {printingMethods.map((method) => (
                       <option key={method.value} value={method.value}>
@@ -889,10 +1441,22 @@ const Modal = ({
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
                   </svg>
                 </div>
-                <input name="addOnOptions" type="text" placeholder="Add-On Options" className="input-primary" value={tempAddOnOptions} onChange={(e) => setTempAddOnOptions(e.target.value)} />
+                <input
+                  name="addOnOptions"
+                  type="text"
+                  placeholder="Add-On Options"
+                  className="input-primary"
+                  value={tempAddOnOptions}
+                  onChange={(e) => setTempAddOnOptions(e.target.value)}
+                />
                 <input
                   name="variantCombinations"
                   type="text"
@@ -903,17 +1467,330 @@ const Modal = ({
                 />
               </div>
             </section>
+
+            {/* Custom Attributes (with option images) */}
+{/* Custom Attributes (with option images) */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Additional Metadata</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <input name="customTags" type="text" placeholder="Custom Tags" className="input-primary" value={tempCustomTags} onChange={(e) => setTempCustomTags(e.target.value)} />
-                <input name="groupedFilters" type="text" placeholder="Grouped Filters" className="input-primary" value={tempGroupedFilters} onChange={(e) => setTempGroupedFilters(e.target.value)} />
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg sm:text-xl font-semibold border-b border-gray-200 pb-2 text-[#8B1C1C] flex-1">
+                  Custom Attributes
+                </h3>
+                <button
+                  type="button"
+                  onClick={addAttribute}
+                  className="btn-primary text-xs px-3 py-2 flex items-center gap-2 me-1"
+                >
+                  <span className="text-sm leading-none">+</span>
+                  Add Attribute
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {customAttributes.length === 0 && (
+                  <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50/50">
+                    <div className="w-16 h-16 mx-auto mb-4 bg-gray-200 rounded-full flex items-center justify-center">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                      </svg>
+                    </div>
+                    <p className="text-gray-500 text-sm">
+                      No custom attributes yet. Click "Add Attribute" to create your first one.
+                    </p>
+                  </div>
+                )}
+
+                {customAttributes.map((attr, attrIndex) => (
+                  <div
+                    key={attr.id}
+                    className="border-2 border-gray-200 rounded-2xl overflow-hidden shadow-sm bg-white"
+                  >
+                    {/* Attribute Header */}
+                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 p-4 border-b border-gray-200">
+                      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                        <div className="flex items-center gap-3 flex-1">
+                          <div className="w-8 h-8 bg-[#8B1C1C] text-white rounded-full flex items-center justify-center text-sm font-semibold">
+                            {attrIndex + 1}
+                          </div>
+                          <input
+                            type="text"
+                            className="input-primary flex-1 bg-white"
+                            placeholder="Attribute name (e.g., Print Type, Size, Color)"
+                            value={attr.name}
+                            onChange={(e) =>
+                              updateAttribute(attr.id, { name: e.target.value })
+                            }
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttribute(attr.id)}
+                          className="btn-primary bg-red-600 hover:bg-red-700 text-xs px-2 py-1 w-full sm:w-auto"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Attribute Options */}
+                    <div className="p-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className="font-medium text-gray-700 text-sm">
+                          Options ({attr.options.length})
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => addOption(attr.id)}
+                          className="btn-primary bg-green-600 hover:bg-green-700 text-sm px-3 py-2 flex items-center gap-1"
+                        >
+                          <span className="text-sm">+</span>
+                          Add Option
+                        </button>
+                      </div>
+
+                      <div className="space-y-4">
+                        {attr.options.map((opt, optIndex) => (
+                          <div
+                            key={opt.id}
+                            className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 hover:bg-gray-50/50 transition-colors"
+                          >
+                            {/* Option Header */}
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-gray-500 bg-gray-200 px-2 py-1 rounded">
+                                  Option {optIndex + 1}
+                                </span>
+                                {opt.is_default && (
+                                  <span className="text-xs font-medium text-[#8B1C1C] bg-red-100 px-2 py-1 rounded">
+                                    Default
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeOption(attr.id, opt.id)}
+                                className="text-gray-400 hover:text-red-600 transition-colors p-1"
+                                title="Remove option"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+
+                            {/* Option Content */}
+                            <div className="space-y-4">
+                              {/* Top Row: Image and Default Radio */}
+                              <div className="flex items-start gap-4">
+                                {/* Image Section */}
+                                <div className="space-y-2">
+                                  <label className="block text-xs font-medium text-gray-600">
+                                    Option Image
+                                  </label>
+                                  <div className="flex items-center gap-4">
+                                    {/* Image Preview */}
+                                    <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 overflow-hidden bg-white flex items-center justify-center shrink-0">
+                                      {opt._image_preview ? (
+                                        <img
+                                          src={opt._image_preview}
+                                          alt={opt.label || "option"}
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        </svg>
+                                      )}
+                                    </div>
+
+                                    {/* Image Controls - Now centered vertically */}
+                                    <div className="flex items-center gap-3 h-20">
+                                      <label className="btn-primary cursor-pointer py-2 px-3 text-xs text-center">
+                                        {opt._image_preview ? 'Change' : 'Upload'}
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const f =
+                                              (e.target.files &&
+                                                e.target.files[0]) ||
+                                              null;
+                                            handleOptionImageChange(
+                                              attr.id,
+                                              opt.id,
+                                              f
+                                            );
+                                          }}
+                                        />
+                                      </label>
+
+                                      {opt._image_preview && (
+                                        <button
+                                          type="button"
+                                          className="text-xs text-red-600 hover:text-red-700 underline"
+                                          onClick={() =>
+                                            handleOptionImageChange(
+                                              attr.id,
+                                              opt.id,
+                                              null
+                                            )
+                                          }
+                                        >
+                                          Remove
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Default Radio - positioned to the right */}
+                                <div className="flex-1 flex justify-end">
+                                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                                    <div className="relative">
+                                      <input
+                                        type="radio"
+                                        name={`default-${attr.id}`}
+                                        checked={!!opt.is_default}
+                                        onChange={() =>
+                                          setDefaultOption(attr.id, opt.id)
+                                        }
+                                        className="sr-only"
+                                      />
+                                      <div className={`w-4 h-4 rounded-full border-2 transition-colors ${
+                                        opt.is_default 
+                                          ? 'border-[#8B1C1C] bg-[#8B1C1C]' 
+                                          : 'border-gray-300 bg-white'
+                                      }`}>
+                                        {opt.is_default && (
+                                          <div className="w-full h-full flex items-center justify-center">
+                                            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <span className="text-xs font-medium text-gray-700">
+                                      Set as default
+                                    </span>
+                                  </label>
+                                </div>
+                              </div>
+
+                              {/* Bottom Row: Label and Price */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                {/* Label Input */}
+                                <div>
+                                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                                    Option Label *
+                                  </label>
+                                  <input
+                                    type="text"
+                                    className="input-primary w-full"
+                                    placeholder="e.g., Single Sided, Large, Red"
+                                    value={opt.label}
+                                    onChange={(e) =>
+                                      updateOption(attr.id, opt.id, {
+                                        label: e.target.value,
+                                      })
+                                    }
+                                  />
+                                </div>
+
+                                {/* Price Delta */}
+                                <div>
+                                  {!opt.is_default ? (
+                                    <>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                                        Price Adjustment (AED)
+                                      </label>
+                                      <div className="relative">
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          className="input-primary w-full pl-8"
+                                          placeholder="0.00"
+                                          value={opt.price_delta}
+                                          onChange={(e) =>
+                                            updateOption(attr.id, opt.id, {
+                                              price_delta: parseFloat(
+                                                e.target.value || ""
+                                              ),
+                                            })
+                                          }
+                                        />
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                                          +
+                                        </span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                                        Price Adjustment
+                                      </label>
+                                      <div className="input-primary bg-gray-100 text-gray-500 flex items-center justify-center">
+                                        No adjustment
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        {attr.options.length === 0 && (
+                          <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg bg-gray-50/50">
+                            <p className="text-gray-500 text-sm">
+                              No options added yet. Click "Add Option" to create the first one.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
+
+            {/* Additional Metadata */}
             <section>
-              <h3 className="text-xl font-semibold mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">Shipping & Processing</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <input name="processingTime" type="text" placeholder="Processing Time" className="input-primary" value={formData.processingTime} onChange={handleChange} />
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Additional Metadata
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <input
+                  name="customTags"
+                  type="text"
+                  placeholder="Custom Tags"
+                  className="input-primary"
+                  value={tempCustomTags}
+                  onChange={(e) => setTempCustomTags(e.target.value)}
+                />
+                <input
+                  name="groupedFilters"
+                  type="text"
+                  placeholder="Grouped Filters"
+                  className="input-primary"
+                  value={tempGroupedFilters}
+                  onChange={(e) => setTempGroupedFilters(e.target.value)}
+                />
+              </div>
+            </section>
+
+            {/* Shipping & Processing */}
+            <section>
+              <h3 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4 border-b border-gray-200 pb-2 text-[#8B1C1C]">
+                Shipping & Processing
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                <input
+                  name="processingTime"
+                  type="text"
+                  placeholder="Processing Time"
+                  className="input-primary"
+                  value={formData.processingTime}
+                  onChange={handleChange}
+                />
                 <input
                   name="shippingClass"
                   type="text"
@@ -924,12 +1801,16 @@ const Modal = ({
                 />
               </div>
             </section>
+
             <div className="flex justify-center pt-2 mb-4">
-              <button type="submit" className="btn-primary">Save</button>
+              <button type="submit" className="btn-primary">
+                Save
+              </button>
             </div>
           </form>
         </div>
       </div>
+
       {isPreviewOpen && previewImages.length > 0 && (
         <div
           className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center"
@@ -937,7 +1818,10 @@ const Modal = ({
           aria-modal="true"
           onClick={closePreview}
         >
-          <div className="relative max-w-5xl w-[92vw] h-[82vh]" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="relative max-w-5xl w-[92vw] h-[82vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <img
               src={previewImages[activePreviewIndex].src}
               alt={`Preview ${activePreviewIndex + 1}`}
@@ -974,6 +1858,7 @@ const Modal = ({
           </div>
         </div>
       )}
+
       <style jsx>{`
         .custom-select {
           appearance: none;
@@ -982,7 +1867,7 @@ const Modal = ({
           background: transparent;
         }
         .custom-select:focus + svg {
-          color: #8B1C1C;
+          color: #8b1c1c;
         }
       `}</style>
     </div>
