@@ -713,193 +713,188 @@ const Modal = ({
   };
   // =================================
 
-  const handleSubmit = async (e: any) => {
-    e.preventDefault();
-    const formErrors = validate();
-    setErrors(formErrors);
-    if (Object.keys(formErrors).length > 0) {
-      toast.error("Please correct the highlighted fields.");
-      return;
+ const handleSubmit = async (e: any) => {
+  e.preventDefault();
+  const formErrors = validate();
+  setErrors(formErrors);
+  if (Object.keys(formErrors).length > 0) {
+    toast.error("Please correct the highlighted fields.");
+    return;
+  }
+
+  const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
+  if (finalSubcategoryIds.length === 0) {
+    toast.error("Please select at least one subcategory.");
+    return;
+  }
+
+  let toastId: any;
+  try {
+    toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
+
+    // ✅ Only collect NEW images (files or data URLs). Do NOT fetch remote URLs in edit mode.
+    const newImagesBase64: string[] = [];
+    for (const img of previewImages) {
+      if (img.kind === "file" && img.file) {
+        newImagesBase64.push(await fileToBase64(img.file));
+      } else if (typeof img.src === "string" && img.src.startsWith("data:image/")) {
+        newImagesBase64.push(img.src);
+      }
+      // if img.kind === "url", we leave it alone during edit; backend keeps existing gallery
     }
+    const hasNewImages = newImagesBase64.length > 0;
 
-    const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
-    if (finalSubcategoryIds.length === 0) {
-      toast.error("Please select at least one subcategory.");
-      return;
-    }
+    const cleanCommaArray = (val: string) =>
+      String(val || "")
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
 
-    let toastId: any;
-    try {
-      toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
+    const parsedCombinations = String(tempVariantCombinations || "")
+      .split("|")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [description, price] = entry.split("::").map((v) => v.trim());
+        return { description, price_override: parseFloat(price) || 0 };
+      });
 
-      // Build full gallery as base64 (files and existing URLs)
-      const imagesBase64: string[] = [];
-      for (const img of previewImages) {
-        if (img.kind === "file" && img.file) {
-          imagesBase64.push(await fileToBase64(img.file));
-        } else if (String(img.src).startsWith("data:")) {
-          imagesBase64.push(img.src);
-        } else {
-          try {
-            const dataUrl = await fetchUrlAsDataUrl(img.src);
-            imagesBase64.push(dataUrl);
-          } catch (e) {
-            console.warn("Image fetch -> data URL failed:", img.src, e);
-          }
+    // Build attributes payload (unchanged)
+    const attrsForPayload: any[] = [];
+    for (const a of customAttributes) {
+      const opts: any[] = [];
+      for (const o of a.options) {
+        let imageBase64 = o.image || null;
+        let imageId = o.image_id || null;
+
+        if (o._image_file) {
+          imageBase64 = await fileToBase64(o._image_file);
+          imageId = null; // replacing the image
         }
-      }
 
-      // Warn (but do not block) if no images were collected in edit mode
-      if (isEditMode && imagesBase64.length === 0) {
-        toast.warn("No images captured from preview. The product may end up with no images.");
-      }
-
-      const cleanCommaArray = (val: string) =>
-        String(val || "")
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-
-      const parsedCombinations = String(tempVariantCombinations || "")
-        .split("|")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .map((entry) => {
-          const [description, price] = entry.split("::").map((v) => v.trim());
-          return { description, price_override: parseFloat(price) || 0 };
+        opts.push({
+          id: o.id,
+          label: o.label,
+          price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
+          is_default: !!o.is_default,
+          image_id: imageId,
+          image: imageBase64, // base64 if changed, else null
         });
-
-      // Build attributes payload
-      const attrsForPayload: any[] = [];
-      for (const a of customAttributes) {
-        const opts: any[] = [];
-        for (const o of a.options) {
-          let imageBase64 = o.image || null;
-          let imageId = o.image_id || null;
-
-          if (o._image_file) {
-            imageBase64 = await fileToBase64(o._image_file);
-            imageId = null; // replacing the image
-          }
-
-          opts.push({
-            id: o.id,
-            label: o.label,
-            price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
-            is_default: !!o.is_default,
-            image_id: imageId,
-            image: imageBase64, // base64 if changed, else null
-          });
-        }
-        if (opts.length > 0 && !opts.some((x) => x.is_default)) {
-          opts[0].is_default = true;
-          opts[0].price_delta = 0;
-        }
-        attrsForPayload.push({ id: a.id, name: a.name, options: opts });
       }
+      if (opts.length > 0 && !opts.some((x) => x.is_default)) {
+        opts[0].is_default = true;
+        opts[0].price_delta = 0;
+      }
+      attrsForPayload.push({ id: a.id, name: a.name, options: opts });
+    }
 
-      const commonFields: any = {
-        name: formData.title,
-        description: formData.description,
-        brand_title: formData.brand,
-        price: parseFloat(formData.normalPrice) || 0,
-        discounted_price: parseFloat(formData.discountedPrice) || 0,
-        tax_rate: parseFloat(formData.taxRate) || 0,
-        price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
-        video_url: formData.videoUrl,
-        fabric_finish: formData.fabricFinish,
-        status: "active",
-        quantity: parseInt(formData.stockQuantity) || 0,
-        low_stock_alert: parseInt(formData.lowStockAlert) || 0,
-        stock_status: formData.stockStatus || "In Stock",
-        category_ids: selectedCategories,
-        subcategory_ids: finalSubcategoryIds,
-        shippingClass: cleanCommaArray(tempShippingClass),
-        processing_time: formData.processingTime,
-        image_alt_text: formData.imageAlt,
-        meta_title: formData.metaTitle,
-        meta_description: formData.metaDescription,
-        meta_keywords: cleanCommaArray(tempMetaKeywords),
-        open_graph_title: formData.ogTitle,
-        open_graph_desc: formData.ogDescription,
-        open_graph_image_url: formData.ogImage,
-        canonical_url: formData.canonicalUrl,
-        json_ld: formData.jsonLdSchema,
-        printing_method: formData.printingMethod,
-        variant_combinations: parsedCombinations,
-        size: cleanCommaArray(tempSizes),
-        colorVariants: cleanCommaArray(tempColorVariants),
-        materialType: cleanCommaArray(tempMaterialType),
-        addOnOptions: cleanCommaArray(tempAddOnOptions),
-        customTags: cleanCommaArray(tempCustomTags),
-        groupedFilters: cleanCommaArray(tempGroupedFilters),
-        customAttributes: attrsForPayload,
+    const commonFields: any = {
+      name: formData.title,
+      description: formData.description,
+      brand_title: formData.brand,
+      price: parseFloat(formData.normalPrice) || 0,
+      discounted_price: parseFloat(formData.discountedPrice) || 0,
+      tax_rate: parseFloat(formData.taxRate) || 0,
+      price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
+      video_url: formData.videoUrl,
+      fabric_finish: formData.fabricFinish,
+      status: "active",
+      quantity: parseInt(formData.stockQuantity) || 0,
+      low_stock_alert: parseInt(formData.lowStockAlert) || 0,
+      stock_status: formData.stockStatus || "In Stock",
+      category_ids: selectedCategories,
+      subcategory_ids: finalSubcategoryIds,
+      shippingClass: cleanCommaArray(tempShippingClass),
+      processing_time: formData.processingTime,
+      image_alt_text: formData.imageAlt,
+      meta_title: formData.metaTitle,
+      meta_description: formData.metaDescription,
+      meta_keywords: cleanCommaArray(tempMetaKeywords),
+      open_graph_title: formData.ogTitle,
+      open_graph_desc: formData.ogDescription,
+      open_graph_image_url: formData.ogImage,
+      canonical_url: formData.canonicalUrl,
+      json_ld: formData.jsonLdSchema,
+      printing_method: formData.printingMethod,
+      variant_combinations: parsedCombinations,
+      size: cleanCommaArray(tempSizes),
+      colorVariants: cleanCommaArray(tempColorVariants),
+      materialType: cleanCommaArray(tempMaterialType),
+      addOnOptions: cleanCommaArray(tempAddOnOptions),
+      customTags: cleanCommaArray(tempCustomTags),
+      groupedFilters: cleanCommaArray(tempGroupedFilters),
+      customAttributes: attrsForPayload,
+    };
+
+    let res: Response;
+
+    if (isEditMode) {
+      // 🔒 EDIT: Only replace images if we actually have NEW base64s
+      const payload: any = {
+        product_ids: [formData.sku || productId],
+        ...commonFields,
       };
 
-      // Always-replace images spec
-      const forceReplaceBlock = {
-        images: imagesBase64, // full gallery
+      if (hasNewImages) {
+        payload.force_replace_images = true;
+        payload.images = newImagesBase64;
+      } else {
+        // No image changes -> do NOT request a replace
+        payload.force_replace_images = false;
+        // and we omit "images" entirely
+      }
+
+      res = await fetch(
+        `${API_BASE_URL}/api/edit-product/`,
+        withFrontendKey({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      );
+    } else {
+      // 🆕 CREATE: send the gallery; create flow expects images
+      const createPayload = {
+        ...commonFields,
+        images: newImagesBase64,
         force_replace_images: true,
       };
-
-      let res: Response;
-      if (isEditMode) {
-        // EDIT flow: call edit endpoint, include product_ids and force replace
-        const payload = {
-          product_ids: [formData.sku || productId], // sku is product_id from fetchDetails
-          ...commonFields,
-          ...forceReplaceBlock,
-        };
-        res = await fetch(
-          `${API_BASE_URL}/api/edit-product/`,
-          withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-        );
-      } else {
-        // CREATE flow: save-product, images included (no force replace needed, but harmless)
-        const payload = {
-          ...commonFields,
-          ...forceReplaceBlock,
-        };
-        res = await fetch(
-          `${API_BASE_URL}/api/save-product/`,
-          withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-        );
-      }
-
-      let result: any = {};
-      try {
-        result = await res.clone().json();
-      } catch {}
-
-      toast.dismiss(toastId);
-      if (res.ok) {
-        toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
-        if (commonFields.quantity <= commonFields.low_stock_alert && commonFields.quantity > 0) {
-          addLowStockNotification(
-            commonFields.name,
-            String(commonFields.subcategory_ids?.[0] ?? commonFields.name),
-            commonFields.quantity
-          );
-        }
-        onClose?.();
-      } else {
-        const fallbackMsg = `Failed to ${isEditMode ? "update" : "save"} product. Status ${res.status}`;
-        toast.error(result?.error || fallbackMsg);
-      }
-    } catch (err: any) {
-      toast.dismiss(toastId);
-      toast.error("Something went wrong while saving.");
-      console.error("Save product error:", err);
+      res = await fetch(
+        `${API_BASE_URL}/api/save-product/`,
+        withFrontendKey({
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload),
+        })
+      );
     }
-  };
+
+    let result: any = {};
+    try {
+      result = await res.clone().json();
+    } catch {}
+
+    toast.dismiss(toastId);
+    if (res.ok) {
+      toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
+      if (commonFields.quantity <= commonFields.low_stock_alert && commonFields.quantity > 0) {
+        addLowStockNotification(
+          commonFields.name,
+          String(commonFields.subcategory_ids?.[0] ?? commonFields.name),
+          commonFields.quantity
+        );
+      }
+      onClose?.();
+    } else {
+      const fallbackMsg = `Failed to ${isEditMode ? "update" : "save"} product. Status ${res.status}`;
+      toast.error(result?.error || fallbackMsg);
+    }
+  } catch (err: any) {
+    toast.dismiss(toastId);
+    toast.error("Something went wrong while saving.");
+    console.error("Save product error:", err);
+  }
+};
 
   return (
     <div
