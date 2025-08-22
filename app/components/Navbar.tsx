@@ -29,7 +29,13 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // NEW: store which product (by object) was locked for each subcategory name
+  const [lockedProductBySub, setLockedProductBySub] = useState<Record<string, any>>({});
+
   const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // NEW: timer for 2s hover-to-lock
+  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,6 +70,18 @@ export default function Navbar() {
     fetchData();
   }, []);
 
+  // 🔒 Disable background scroll while dropdown is visible
+  useEffect(() => {
+    if (dropdownVisible) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [dropdownVisible]);
+
   const handleNavEnter = (idx: number) => {
     if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
     setOpenIndex(idx);
@@ -88,6 +106,7 @@ export default function Navbar() {
 
   const handleDropdownLeave = () => {
     setIsDropdownHovered(false);
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
     closeTimeoutRef.current = setTimeout(() => {
       setDropdownVisible(false);
       setHoveredSubcategory(null);
@@ -95,19 +114,18 @@ export default function Navbar() {
     }, 300);
   };
 
-  const getImageGrid = (categoryName: string, subcategoryName: string | null) => {
-    const category = productData.find((c: any) => c.name === categoryName);
-    if (!category) return [];
+  // Helper: get a category object by its display name (title)
+  const getCategoryByTitle = (title: string) =>
+    productData.find((c: any) => c.name === title);
 
-    if (subcategoryName) {
-      const subcategory = category.subcategories?.find((s: any) => s.name === subcategoryName);
-      if (!subcategory) return [];
-
-      const productImages = subcategory.products?.flatMap((p: any) => p.images || []) || [];
-      return productImages.slice(0, 16);
+  // Helper: build product href; adjust fields if your API differs
+  const buildProductHref = (category: any, sub: any, product: any) => {
+    if (product?.url) {
+      return product.url.startsWith("/home")
+        ? product.url
+        : `/home/${category.url}/${sub.url}/products/${product.url}`;
     }
-
-    return category.subcategories?.flatMap((s: any) => s.images || []).slice(0, 16) || [];
+    return `/home/${category.url}/${sub.url}/products/${product?.id}`;
   };
 
   if (loading || !navItemsData.length) return null;
@@ -164,7 +182,7 @@ export default function Navbar() {
         <div
           onMouseEnter={handleDropdownEnter}
           onMouseLeave={handleDropdownLeave}
-          className={`fixed left-1/2 top-[200px] -translate-x-1/2 z-50 w-full max-w-[1400px] px-2 transition-all duration-300 ease-out ${
+          className={`fixed left-1/2 top:[200px] top-[200px] -translate-x-1/2 z-50 w-full max-w-[1400px] px-2 transition-all duration-300 ease-out ${
             dropdownVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
           }`}
         >
@@ -180,8 +198,24 @@ export default function Navbar() {
                     key={colIdx}
                     href={col.url || "#"}
                     className={`${getDropdownItemColorClass(col.color || "black")} text-sm py-1 hover:underline`}
-                    onMouseEnter={() => setHoveredSubcategory(col.label)}
-                    onMouseLeave={() => setHoveredSubcategory(null)}
+                    onMouseEnter={() => {
+                      setHoveredSubcategory(col.label);
+                      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                      hoverTimerRef.current = setTimeout(() => {
+                        const catTitle = navItemsData[openIndex].dropdownContent.title;
+                        const category = getCategoryByTitle(catTitle);
+                        const sub = category?.subcategories?.find((s: any) => s.name === col.label);
+                        const productToLock =
+                          sub?.products?.find((p: any) => p?.images?.length && p.images[0]?.url);
+                        if (productToLock) {
+                          setLockedProductBySub((prev) => ({ ...prev, [col.label]: productToLock }));
+                        }
+                      }, 2000);
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredSubcategory(null);
+                      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+                    }}
                     onClick={() => setMobileOpen(false)}
                   >
                     {col.label}
@@ -190,29 +224,58 @@ export default function Navbar() {
               </div>
             </div>
 
-            {/* Right Column */}
+            {/* Right Column — one tile per subcategory */}
             <div className="w-full md:w-[86%] pl-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
-              {getImageGrid(
-                navItemsData[openIndex].dropdownContent.title,
-                hoveredSubcategory
-              ).map((img: any, i: number) => (
-                <div
-                  key={i}
-                  className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center"
-                >
-                  <img
-                    src={img.url}
-                    alt={img.alt_text || "Image"}
-                    loading="lazy"
-                    className="object-cover w-full h-full rounded-md"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.onerror = null;
-                      target.src = "https://i.ibb.co/ynT1dLc/image-not-found.png";
-                    }}
-                  />
-                </div>
-              ))}
+              {(() => {
+                const catTitle = navItemsData[openIndex].dropdownContent.title;
+                const category = getCategoryByTitle(catTitle);
+                const subs = category?.subcategories || [];
+
+                return subs.map((sub: any, i: number) => {
+                  const lockedProduct = lockedProductBySub[sub.name] || null;
+
+                  const subImage = sub?.images?.[0];
+                  const prodImage = lockedProduct?.images?.[0];
+                  const showProduct = !!lockedProduct && prodImage?.url;
+
+                  const imgUrl = showProduct ? prodImage.url : subImage?.url;
+                  const imgAlt =
+                    (showProduct ? (prodImage?.alt_text || lockedProduct?.name) : (subImage?.alt_text || sub?.name)) ||
+                    "Image";
+
+                  const subHref = `/home/${category?.url}/${sub?.url}`;
+                  const href = showProduct ? buildProductHref(category, sub, lockedProduct) : subHref;
+
+                  return (
+                    <Link
+                      key={i}
+                      href={href || "#"}
+                      className="w-[120px] mx-auto"
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <div className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center">
+                        <img
+                          src={imgUrl || "https://i.ibb.co/ynT1dLc/image-not-found.png"}
+                          alt={imgAlt}
+                          loading="lazy"
+                          className="object-cover w-full h-full rounded-md"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.onerror = null;
+                            target.src = "https://i.ibb.co/ynT1dLc/image-not-found.png";
+                          }}
+                        />
+                      </div>
+                      <div className="mt-1 text-center">
+                        <div className="text-xs font-medium text-gray-900">{sub?.name}</div>
+                        {showProduct && (
+                          <div className="text-[10px] text-gray-600">{lockedProduct?.name}</div>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                });
+              })()}
             </div>
           </div>
         </div>

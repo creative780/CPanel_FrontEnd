@@ -58,10 +58,14 @@ export default function PrintingServicePage() {
         const mid = Math.ceil(all.length / 2);
 
         setDesktopImages(
-          desktop.length ? desktop : all.slice(0, mid).map((img: any) => img.url) || [fallbackImage]
+          desktop.length
+            ? desktop
+            : all.slice(0, mid).map((img: any) => img.url) || [fallbackImage]
         );
         setMobileImages(
-          mobile.length ? mobile : all.slice(mid).map((img: any) => img.url) || [fallbackImage]
+          mobile.length
+            ? mobile
+            : all.slice(mid).map((img: any) => img.url) || [fallbackImage]
         );
       })
       .catch(() => {
@@ -74,7 +78,9 @@ export default function PrintingServicePage() {
     fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey())
       .then((res) => res.json())
       .then((data) => {
-        const visible = data.filter((category) => category.status === "visible");
+        const visible = data.filter(
+          (category) => category.status === "visible"
+        );
         setCategories(visible);
       })
       .catch((err) => console.error("Error fetching categories:", err));
@@ -172,7 +178,7 @@ export default function PrintingServicePage() {
         height="250"
         src="/images/Banner3.jpg"
         alt="Banner Image"
-        className="block bg-[#D9D9D9] w-full h-[400px] mx-auto"
+        className="block bg-[#D9D9D9] w-full h-auto mx-auto"
       />
       <div className="px-4 sm:px-6 lg:px-24 py-8">
         <h2 className="text-[#891F1A] text-2xl sm:text-3xl font-bold text-center mb-6">
@@ -181,7 +187,9 @@ export default function PrintingServicePage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {categories.map((category) => {
-            const formattedUrl = `/home/${category.name.toLowerCase().replace(/\s+/g, "-")}`;
+            const formattedUrl = `/home/${category.name
+              .toLowerCase()
+              .replace(/\s+/g, "-")}`;
 
             return (
               <Link key={category.id} href={formattedUrl} passHref>
@@ -191,7 +199,7 @@ export default function PrintingServicePage() {
                     alt={category.name}
                     className="w-full h-auto object-cover rounded-lg"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/images/fallback.jpg";
+                      (e.target as HTMLImageElement).src = "/images/img1.jpg";
                     }}
                   />
                   <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
@@ -208,30 +216,33 @@ export default function PrintingServicePage() {
         height="250"
         src="/images/Banner2.jpg"
         alt="Banner Image"
-        className="block bg-[#D9D9D9]  w-full h-[390px]"
+        className="block bg-[#D9D9D9]  w-full h-auto"
       />
       <SecondCarousel />
       <Reviews />
 
       {/* CTA */}
-      <section
-        className="flex flex-col lg:flex-row gap-8 items-center px-4 sm:px-6 lg:px-24 py-12 bg-white"
-      >
+      <section className="flex flex-col lg:flex-row gap-8 items-center px-4 sm:px-6 lg:px-24 py-12 bg-white">
         <div className="flex-1">
-          <p className="text-[#837E8C] text-sm font-semibold mb-2">Call To Action</p>
+          <p className="text-[#837E8C] text-sm font-semibold mb-2">
+            Call To Action
+          </p>
           <h2 className="text-[#0E0E0E] text-3xl sm:text-4xl font-bold leading-tight mb-4">
             Let's Bring Your Ideas to Life
           </h2>
           <p className="text-[#868686] max-w-xl">
-            Scelerisque in dolor donec neque velit. Risus aenean integer elementum
-            odio sed adipiscing. Sem id scelerisque nunc quis. Imperdiet nascetur
-            consequat.
+            Scelerisque in dolor donec neque velit. Risus aenean integer
+            elementum odio sed adipiscing. Sem id scelerisque nunc quis.
+            Imperdiet nascetur consequat.
           </p>
 
           {/* Callback Form */}
           <form onSubmit={handleSubmit} className="mt-10 space-y-6 max-w-md">
             <div>
-              <label htmlFor="name" className="block text-sm font-semibold text-gray-700 mb-1">
+              <label
+                htmlFor="name"
+                className="block text-sm font-semibold text-gray-700 mb-1"
+              >
                 Full Name
               </label>
               <input
@@ -245,7 +256,10 @@ export default function PrintingServicePage() {
             </div>
 
             <div className="mt-6">
-              <label htmlFor="phone" className="block text-sm font-semibold text-gray-700 mb-1">
+              <label
+                htmlFor="phone"
+                className="block text-sm font-semibold text-gray-700 mb-1"
+              >
                 Phone Number
               </label>
               <input
@@ -259,7 +273,10 @@ export default function PrintingServicePage() {
             </div>
 
             <div>
-              <label htmlFor="message" className="block text-sm font-semibold text-gray-700 mb-1">
+              <label
+                htmlFor="message"
+                className="block text-sm font-semibold text-gray-700 mb-1"
+              >
                 Message
               </label>
               <textarea
