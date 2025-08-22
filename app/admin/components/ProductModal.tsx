@@ -10,10 +10,10 @@ type AttributeOption = {
   label: string;
   price_delta: number; // AED
   is_default?: boolean;
-  image_id?: string | null;       // existing backend image reference
-  _image_file?: File | null;      // UI only (local file)
-  _image_preview?: string | null; // UI only (preview URL)
-  image?: string | null;          // base64 if changed, else null
+  image_id?: string | null;
+  _image_file?: File | null;
+  _image_preview?: string | null;
+  image?: string | null;
 };
 
 type CustomAttribute = {
@@ -25,7 +25,7 @@ type CustomAttribute = {
 type ModalImage = {
   src: string;
   file?: File | null;
-  kind: "file" | "url" | "data";
+  kind: "file" | "url"; // keep existing vs new; we’ll always resubmit full gallery as base64 on save
 };
 
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
@@ -39,37 +39,26 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-/**
- * Robust JSON parser that:
- * - throws on non-2xx;
- * - verifies Content-Type is JSON;
- * - surfaces the first ~200 chars of non-JSON responses (e.g., HTML error pages).
- */
 const parseJsonSafe = async (res: Response, label: string) => {
   if (!res.ok) {
-    // try to read text for better diagnostics
     let body = "";
-    try { body = await res.text(); } catch {}
-    throw new Error(`${label}: HTTP ${res.status}${body ? ` • ${body.slice(0,200)}…` : ""}`);
+    try {
+      body = await res.text();
+    } catch {}
+    throw new Error(`${label}: HTTP ${res.status}${body ? ` • ${body.slice(0, 200)}…` : ""}`);
   }
-  const ct = res.headers.get("content-type") || "";
-  if (!ct.toLowerCase().includes("application/json")) {
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (!ct.includes("application/json")) {
     const body = await res.text();
-    throw new Error(`${label}: Non-JSON response (${ct}). Body: ${body.slice(0,200)}…`);
+    throw new Error(`${label}: Non-JSON response (${ct}). Body: ${body.slice(0, 200)}…`);
   }
   return res.json();
 };
 
-const addLowStockNotification = (
-  productName: string,
-  sku: string,
-  quantity: number
-) => {
+const addLowStockNotification = (productName: string, sku: string, quantity: number) => {
   if (typeof window === "undefined") return;
   const existing = JSON.parse(localStorage.getItem("notifications") || "[]");
-  const alreadyExists = existing.some(
-    (n: any) => n.type === "low_stock" && n.sku === sku
-  );
+  const alreadyExists = existing.some((n: any) => n.type === "low_stock" && n.sku === sku);
   if (alreadyExists) return;
   const newNotification = {
     id: crypto.randomUUID(),
@@ -81,10 +70,7 @@ const addLowStockNotification = (
     message: `⚠️ Product "${productName}" (SKU: ${sku}) has low stock (${quantity} left)`,
     created_at: new Date().toISOString(),
   };
-  localStorage.setItem(
-    "notifications",
-    JSON.stringify([newNotification, ...existing])
-  );
+  localStorage.setItem("notifications", JSON.stringify([newNotification, ...existing]));
 };
 
 const urlForDisplay = (src: string): string => {
@@ -92,20 +78,6 @@ const urlForDisplay = (src: string): string => {
   const base = API_BASE_URL.replace(/\/+$/, "");
   const rel = String(src || "").replace(/^\/+/, "");
   return `${base}/${rel}`;
-};
-
-const dirKeyFromDisplayUrl = (displayUrl: string): string => {
-  try {
-    const u = new URL(displayUrl);
-    const parts = u.pathname.split("/");
-    parts.pop();
-    return u.origin + parts.join("/") + "/";
-  } catch {
-    const clean = displayUrl.replace(/[#?].*$/, "");
-    const parts = clean.split("/");
-    parts.pop();
-    return parts.join("/") + "/";
-  }
 };
 
 const fileToBase64 = (file: File) =>
@@ -225,27 +197,19 @@ const Modal = ({
     setActivePreviewIndex((i) => (i + 1) % Math.max(previewImages.length, 1));
   }, [previewImages.length]);
   const prevPreview = useCallback(() => {
-    setActivePreviewIndex(
-      (i) =>
-        (i - 1 + Math.max(previewImages.length, 1)) %
-        Math.max(previewImages.length, 1)
-    );
+    setActivePreviewIndex((i) => (i - 1 + Math.max(previewImages.length, 1)) % Math.max(previewImages.length, 1));
   }, [previewImages.length]);
 
   const categoryName = useMemo(() => {
     if (!formData.category) return "";
-    const found = categories.find(
-      (c) => c.id?.toString() === formData.category?.toString()
-    );
+    const found = categories.find((c) => c.id?.toString() === formData.category?.toString());
     return found?.name || "";
   }, [categories, formData.category]);
 
   const subcategoryName = useMemo(() => {
     const subId = formData.subcategory || selectedSubcategories?.[0];
     if (!subId) return "";
-    const found = subcategories.find(
-      (s) => s.id?.toString() === subId?.toString()
-    );
+    const found = subcategories.find((s) => s.id?.toString() === subId?.toString());
     return found?.name || "";
   }, [subcategories, formData.subcategory, selectedSubcategories]);
 
@@ -307,15 +271,7 @@ const Modal = ({
     // --- EDIT MODE: fetch all product pieces (including attributes) ---
     const fetchDetails = async () => {
       try {
-        const [
-          basicRes,
-          seoRes,
-          variantRes,
-          shipRes,
-          otherRes,
-          comboRes,
-          attrRes,
-        ] = await Promise.all([
+        const [basicRes, seoRes, variantRes, shipRes, otherRes, comboRes, attrRes] = await Promise.all([
           fetch(
             `${API_BASE_URL}/api/show_specific_product/`,
             withFrontendKey({
@@ -374,12 +330,12 @@ const Modal = ({
           ),
         ]);
 
-        const basic    = await parseJsonSafe(basicRes,   "show_specific_product");
-        const seo      = await parseJsonSafe(seoRes,     "show_product_seo");
-        const variant  = await parseJsonSafe(variantRes, "show_product_variant");
-        const shipping = await parseJsonSafe(shipRes,    "show_product_shipping_info");
-        const other    = await parseJsonSafe(otherRes,   "show_product_other_details");
-        const combos   = await parseJsonSafe(comboRes,   "show_product_variants");
+        const basic = await parseJsonSafe(basicRes, "show_specific_product");
+        const seo = await parseJsonSafe(seoRes, "show_product_seo");
+        const variant = await parseJsonSafe(variantRes, "show_product_variant");
+        const shipping = await parseJsonSafe(shipRes, "show_product_shipping_info");
+        const other = await parseJsonSafe(otherRes, "show_product_other_details");
+        const combos = await parseJsonSafe(comboRes, "show_product_variants");
 
         // Attributes: tolerate 404 (treat as empty)
         let attrs: any[] = [];
@@ -389,7 +345,6 @@ const Modal = ({
           try {
             attrs = await parseJsonSafe(attrRes, "show_product_attributes");
           } catch (e) {
-            // if backend returns non-JSON or unexpected, degrade gracefully
             console.warn("Attributes load warning:", e);
             attrs = [];
           }
@@ -435,67 +390,32 @@ const Modal = ({
         }));
 
         // Prefill temp strings
-        setTempMetaKeywords(
-          Array.isArray(seo.meta_keywords) ? seo.meta_keywords.join(", ") : ""
-        );
-        setTempCustomTags(
-          Array.isArray(seo.custom_tags) ? seo.custom_tags.join(", ") : ""
-        );
-        setTempGroupedFilters(
-          Array.isArray(seo.grouped_filters)
-            ? seo.grouped_filters.join(", ")
-            : ""
-        );
+        setTempMetaKeywords(Array.isArray(seo.meta_keywords) ? seo.meta_keywords.join(", ") : "");
+        setTempCustomTags(Array.isArray(seo.custom_tags) ? seo.custom_tags.join(", ") : "");
+        setTempGroupedFilters(Array.isArray(seo.grouped_filters) ? seo.grouped_filters.join(", ") : "");
         setTempSizes(Array.isArray(variant.sizes) ? variant.sizes.join(", ") : "");
-        setTempColorVariants(
-          Array.isArray(variant.color_variants)
-            ? variant.color_variants.join(", ")
-            : ""
-        );
-        setTempMaterialType(
-          Array.isArray(variant.material_types)
-            ? variant.material_types.join(", ")
-            : ""
-        );
-        setTempAddOnOptions(
-          Array.isArray(variant.add_on_options)
-            ? variant.add_on_options.join(", ")
-            : ""
-        );
+        setTempColorVariants(Array.isArray(variant.color_variants) ? variant.color_variants.join(", ") : "");
+        setTempMaterialType(Array.isArray(variant.material_types) ? variant.material_types.join(", ") : "");
+        setTempAddOnOptions(Array.isArray(variant.add_on_options) ? variant.add_on_options.join(", ") : "");
         setTempShippingClass(shipping.shipping_class || "");
         setTempVariantCombinations(
           Array.isArray(combos.variant_combinations)
-            ? combos.variant_combinations
-                .map((c: any) => `${c.description}::${c.price_override}`)
-                .join(" | ")
+            ? combos.variant_combinations.map((c: any) => `${c.description}::${c.price_override}`).join(" | ")
             : ""
         );
 
-        // Images (preserve & display)
-        const existingArray = Array.isArray(other.images)
-          ? other.images
-          : other.images
-          ? [other.images]
-          : [];
+        // Images (preserve & display) — keep ALL existing, no directory trimming
+        const existingArray = Array.isArray(other.images) ? other.images : other.images ? [other.images] : [];
         const displayUrls = existingArray.map((p: string) => urlForDisplay(p));
-        let filteredDisplay = displayUrls;
-        if (displayUrls.length > 0) {
-          const lastDir = dirKeyFromDisplayUrl(
-            displayUrls[displayUrls.length - 1]
-          );
-          filteredDisplay = displayUrls.filter(
-            (u) => dirKeyFromDisplayUrl(u) === lastDir
-          );
-        }
         setPreviewImages(
-          filteredDisplay.map((p: string) => ({
+          displayUrls.map((p: string) => ({
             src: p,
             kind: "url" as const,
             file: null,
           }))
         );
-        if (other.subcategory_ids?.length > 0)
-          setSelectedSubcategories(other.subcategory_ids);
+
+        if (other.subcategory_ids?.length > 0) setSelectedSubcategories(other.subcategory_ids);
 
         // Attributes (normalize)
         if (Array.isArray(attrs)) {
@@ -506,12 +426,7 @@ const Modal = ({
               ? a.options.map((o: any) => ({
                   id: String(o?.id || crypto.randomUUID()),
                   label: String(o?.label || ""),
-                  price_delta:
-                    typeof o?.price_delta === "number"
-                      ? o.price_delta
-                      : o?.price_delta
-                      ? parseFloat(o.price_delta)
-                      : 0,
+                  price_delta: typeof o?.price_delta === "number" ? o.price_delta : o?.price_delta ? parseFloat(o.price_delta) : 0,
                   is_default: !!o?.is_default,
                   image_id: o?.image_id || null,
                   _image_file: null,
@@ -563,9 +478,7 @@ const Modal = ({
   // Auto-set category if a subcategory is preselected
   useEffect(() => {
     if (formData.subcategory && !formData.category) {
-      const selectedSub = subcategories.find(
-        (s) => s.id?.toString() === formData.subcategory?.toString()
-      );
+      const selectedSub = subcategories.find((s) => s.id?.toString() === formData.subcategory?.toString());
       if (selectedSub && selectedSub.categories?.length > 0) {
         const firstName = selectedSub.categories[0];
         const match = categories.find((c) => c.name === firstName);
@@ -608,8 +521,7 @@ const Modal = ({
           })
         );
         const data = await parseJsonSafe(res, "generate-product-id");
-        if (data?.product_id)
-          setFormData((prev: any) => ({ ...prev, sku: data.product_id }));
+        if (data?.product_id) setFormData((prev: any) => ({ ...prev, sku: data.product_id }));
       } catch (err) {
         console.error("Failed to generate product ID:", err);
       }
@@ -623,8 +535,7 @@ const Modal = ({
   useEffect(() => {
     return () => {
       previewImages.forEach((img) => {
-        if (img.kind === "file" && (img.src as any)?.startsWith?.("blob:"))
-          URL.revokeObjectURL(img.src);
+        if (img.kind === "file" && (img.src as any)?.startsWith?.("blob:")) URL.revokeObjectURL(img.src);
       });
     };
   }, [previewImages]);
@@ -634,12 +545,9 @@ const Modal = ({
   const validate = () => {
     const newErrors: any = {};
     if (!formData.title.trim()) newErrors.title = "Product title is required";
-    if (!formData.description.trim())
-      newErrors.description = "Description is required";
-    if (!formData.subcategory)
-      newErrors.subcategory = "Subcategory is required";
-    if (!isEditMode && previewImages.length === 0)
-      newErrors.image = "At least one image is required";
+    if (!formData.description.trim()) newErrors.description = "Description is required";
+    if (!formData.subcategory) newErrors.subcategory = "Subcategory is required";
+    if (!isEditMode && previewImages.length === 0) newErrors.image = "At least one image is required";
     return newErrors;
   };
 
@@ -655,9 +563,7 @@ const Modal = ({
     const allowed = Math.max(0, MAX_IMAGES - currentCount);
     const chosen = files.slice(0, allowed);
     if (files.length > allowed) {
-      toast.warn(
-        `You can upload up to ${MAX_IMAGES} images. Extra ${files.length - allowed} file(s) ignored.`
-      );
+      toast.warn(`You can upload up to ${MAX_IMAGES} images. Extra ${files.length - allowed} file(s) ignored.`);
     }
     const items: ModalImage[] = chosen.map((file) => ({
       src: URL.createObjectURL(file),
@@ -679,8 +585,7 @@ const Modal = ({
     setPreviewImages((prev) => {
       const copy = [...prev];
       const [removed] = copy.splice(idx, 1);
-      if (removed?.kind === "file" && (removed.src as any)?.startsWith?.("blob:"))
-        URL.revokeObjectURL(removed.src);
+      if (removed?.kind === "file" && (removed.src as any)?.startsWith?.("blob:")) URL.revokeObjectURL(removed.src);
       if (isPreviewOpen) {
         if (idx === activePreviewIndex) {
           setActivePreviewIndex((i) => Math.max(0, i - 1));
@@ -693,15 +598,11 @@ const Modal = ({
   };
 
   const handleCategoryChange = (id: any) => {
-    setSelectedCategories((prev) =>
-      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
-    );
+    setSelectedCategories((prev) => (prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]));
   };
 
   const handleSubcategoryChange = (id: any, linkedCategories?: string[]) => {
-    setSelectedSubcategories((prev) =>
-      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
-    );
+    setSelectedSubcategories((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
     if (selectedCategories.length === 0 && linkedCategories?.length) {
       const matchedIds = linkedCategories
         .map((catName) => categories.find((c) => c.name === catName)?.id)
@@ -724,10 +625,7 @@ const Modal = ({
 
   // ======= Attribute helpers =======
   const addAttribute = () => {
-    setCustomAttributes((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), name: "", options: [] },
-    ]);
+    setCustomAttributes((prev) => [...prev, { id: crypto.randomUUID(), name: "", options: [] }]);
   };
 
   const removeAttribute = (attrId: string) => {
@@ -735,9 +633,7 @@ const Modal = ({
   };
 
   const updateAttribute = (attrId: string, patch: Partial<CustomAttribute>) => {
-    setCustomAttributes((prev) =>
-      prev.map((a) => (a.id === attrId ? { ...a, ...patch } : a))
-    );
+    setCustomAttributes((prev) => prev.map((a) => (a.id === attrId ? { ...a, ...patch } : a)));
   };
 
   const addOption = (attrId: string) => {
@@ -767,27 +663,17 @@ const Modal = ({
 
   const removeOption = (attrId: string, optId: string) => {
     setCustomAttributes((prev) =>
-      prev.map((a) =>
-        a.id === attrId
-          ? { ...a, options: a.options.filter((o) => o.id !== optId) }
-          : a
-      )
+      prev.map((a) => (a.id === attrId ? { ...a, options: a.options.filter((o) => o.id !== optId) } : a))
     );
   };
 
-  const updateOption = (
-    attrId: string,
-    optId: string,
-    patch: Partial<AttributeOption>
-  ) => {
+  const updateOption = (attrId: string, optId: string, patch: Partial<AttributeOption>) => {
     setCustomAttributes((prev) =>
       prev.map((a) =>
         a.id === attrId
           ? {
               ...a,
-              options: a.options.map((o) =>
-                o.id === optId ? { ...o, ...patch } : o
-              ),
+              options: a.options.map((o) => (o.id === optId ? { ...o, ...patch } : o)),
             }
           : a
       )
@@ -801,9 +687,7 @@ const Modal = ({
           ? {
               ...a,
               options: a.options.map((o) =>
-                o.id === optId
-                  ? { ...o, is_default: true, price_delta: 0 }
-                  : { ...o, is_default: false }
+                o.id === optId ? { ...o, is_default: true, price_delta: 0 } : { ...o, is_default: false }
               ),
             }
           : a
@@ -811,11 +695,7 @@ const Modal = ({
     );
   };
 
-  const handleOptionImageChange = (
-    attrId: string,
-    optId: string,
-    file: File | null
-  ) => {
+  const handleOptionImageChange = (attrId: string, optId: string, file: File | null) => {
     if (!file) {
       return updateOption(attrId, optId, {
         _image_file: null,
@@ -842,11 +722,7 @@ const Modal = ({
       return;
     }
 
-    const finalSubcategoryIds = [
-      ...new Set(
-        [...selectedSubcategories, formData.subcategory].filter(Boolean)
-      ),
-    ];
+    const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
     if (finalSubcategoryIds.length === 0) {
       toast.error("Please select at least one subcategory.");
       return;
@@ -854,9 +730,9 @@ const Modal = ({
 
     let toastId: any;
     try {
-      toastId = toast.loading("Saving product...");
+      toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
 
-      // Product images -> base64
+      // Build full gallery as base64 (files and existing URLs)
       const imagesBase64: string[] = [];
       for (const img of previewImages) {
         if (img.kind === "file" && img.file) {
@@ -864,7 +740,6 @@ const Modal = ({
         } else if (String(img.src).startsWith("data:")) {
           imagesBase64.push(img.src);
         } else {
-          // Convert remote URL to data URL so backend receives consistent payload
           try {
             const dataUrl = await fetchUrlAsDataUrl(img.src);
             imagesBase64.push(dataUrl);
@@ -873,12 +748,10 @@ const Modal = ({
           }
         }
       }
+
+      // Warn (but do not block) if no images were collected in edit mode
       if (isEditMode && imagesBase64.length === 0) {
-        toast.dismiss(toastId);
-        toast.error(
-          "Could not preserve existing images. Please reselect images before saving."
-        );
-        return;
+        toast.warn("No images captured from preview. The product may end up with no images.");
       }
 
       const cleanCommaArray = (val: string) =>
@@ -925,15 +798,14 @@ const Modal = ({
         attrsForPayload.push({ id: a.id, name: a.name, options: opts });
       }
 
-      const payload: any = {
+      const commonFields: any = {
         name: formData.title,
         description: formData.description,
         brand_title: formData.brand,
         price: parseFloat(formData.normalPrice) || 0,
         discounted_price: parseFloat(formData.discountedPrice) || 0,
         tax_rate: parseFloat(formData.taxRate) || 0,
-        price_calculator:
-          (formData as any).price_calculator ?? formData.priceCalculator,
+        price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
         video_url: formData.videoUrl,
         fabric_finish: formData.fabricFinish,
         status: "active",
@@ -942,7 +814,6 @@ const Modal = ({
         stock_status: formData.stockStatus || "In Stock",
         category_ids: selectedCategories,
         subcategory_ids: finalSubcategoryIds,
-        images: imagesBase64,
         shippingClass: cleanCommaArray(tempShippingClass),
         processing_time: formData.processingTime,
         image_alt_text: formData.imageAlt,
@@ -962,41 +833,65 @@ const Modal = ({
         addOnOptions: cleanCommaArray(tempAddOnOptions),
         customTags: cleanCommaArray(tempCustomTags),
         groupedFilters: cleanCommaArray(tempGroupedFilters),
-
-        // Backend expects camelCase for attributes here:
         customAttributes: attrsForPayload,
       };
 
-      const res = await fetch(
-        `${API_BASE_URL}/api/save-product/`,
-        withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-      );
+      // Always-replace images spec
+      const forceReplaceBlock = {
+        images: imagesBase64, // full gallery
+        force_replace_images: true,
+      };
 
-      // Prefer structured error if JSON; otherwise show fallback
+      let res: Response;
+      if (isEditMode) {
+        // EDIT flow: call edit endpoint, include product_ids and force replace
+        const payload = {
+          product_ids: [formData.sku || productId], // sku is product_id from fetchDetails
+          ...commonFields,
+          ...forceReplaceBlock,
+        };
+        res = await fetch(
+          `${API_BASE_URL}/api/edit-product/`,
+          withFrontendKey({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        );
+      } else {
+        // CREATE flow: save-product, images included (no force replace needed, but harmless)
+        const payload = {
+          ...commonFields,
+          ...forceReplaceBlock,
+        };
+        res = await fetch(
+          `${API_BASE_URL}/api/save-product/`,
+          withFrontendKey({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        );
+      }
+
       let result: any = {};
       try {
         result = await res.clone().json();
-      } catch {
-        // ignore; non-JSON error already handled by status below
-      }
+      } catch {}
 
       toast.dismiss(toastId);
       if (res.ok) {
-        toast.success("Product saved successfully!");
-        if (payload.quantity <= payload.low_stock_alert && payload.quantity > 0) {
+        toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
+        if (commonFields.quantity <= commonFields.low_stock_alert && commonFields.quantity > 0) {
           addLowStockNotification(
-            payload.name,
-            String(payload.subcategory_ids?.[0] ?? payload.name),
-            payload.quantity
+            commonFields.name,
+            String(commonFields.subcategory_ids?.[0] ?? commonFields.name),
+            commonFields.quantity
           );
         }
         onClose?.();
       } else {
-        const fallbackMsg = `Failed to save product. Status ${res.status}`;
+        const fallbackMsg = `Failed to ${isEditMode ? "update" : "save"} product. Status ${res.status}`;
         toast.error(result?.error || fallbackMsg);
       }
     } catch (err: any) {
@@ -1061,9 +956,7 @@ const Modal = ({
             </div>
           )}
           {errors.image && <p className="text-red-600 mt-2">{errors.image}</p>}
-          <p className="text-xs text-gray-500 mt-2">
-            You can upload up to {MAX_IMAGES} images.
-          </p>
+          <p className="text-xs text-gray-500 mt-2">You can upload up to {MAX_IMAGES} images.</p>
         </div>
 
         {/* Right: form */}
@@ -1098,9 +991,7 @@ const Modal = ({
                   onChange={handleChange}
                   required
                 />
-                {errors.title && (
-                  <p className="text-red-600 sm:col-span-2">{errors.title}</p>
-                )}
+                {errors.title && <p className="text-red-600 sm:col-span-2">{errors.title}</p>}
 
                 <textarea
                   name="description"
@@ -1110,9 +1001,7 @@ const Modal = ({
                   onChange={handleChange}
                   required
                 />
-                {errors.description && (
-                  <p className="text-red-600 sm:col-span-2">{errors.description}</p>
-                )}
+                {errors.description && <p className="text-red-600 sm:col-span-2">{errors.description}</p>}
 
                 <input
                   name="sku"
@@ -1151,7 +1040,10 @@ const Modal = ({
                       <svg
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
                         xmlns="http://www.w3.org/2000/svg"
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </div>
@@ -1165,9 +1057,7 @@ const Modal = ({
                           const subId = e.target.value;
                           setFormData((prev: any) => ({ ...prev, subcategory: subId }));
                           if (!formData.category) {
-                            const selectedSub = subcategories.find(
-                              (s) => s.id?.toString() === subId?.toString()
-                            );
+                            const selectedSub = subcategories.find((s) => s.id?.toString() === subId?.toString());
                             if (selectedSub && selectedSub.categories?.length > 0) {
                               const matchedCatIds = selectedSub.categories
                                 .map((catName: string) => categories.find((c) => c.name === catName)?.id)
@@ -1192,7 +1082,10 @@ const Modal = ({
                       <svg
                         className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
                         xmlns="http://www.w3.org/2000/svg"
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </div>
@@ -1216,9 +1109,7 @@ const Modal = ({
                   </>
                 )}
 
-                {errors.subcategory && (
-                  <p className="text-red-600 sm:col-span-2">{errors.subcategory}</p>
-                )}
+                {errors.subcategory && <p className="text-red-600 sm:col-span-2">{errors.subcategory}</p>}
 
                 <input
                   name="brand"
@@ -1229,9 +1120,7 @@ const Modal = ({
                   onChange={handleChange}
                   required
                 />
-                {errors.brand && (
-                  <p className="text-red-600 sm:col-span-2">{errors.brand}</p>
-                )}
+                {errors.brand && <p className="text-red-600 sm:col-span-2">{errors.brand}</p>}
               </div>
             </section>
 
@@ -1245,14 +1134,7 @@ const Modal = ({
                   <label htmlFor="file-upload" className="btn-primary inline-block cursor-pointer text-center">
                     Choose Image(s)
                   </label>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
+                  <input id="file-upload" type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
                 </div>
                 <input
                   name="imageAlt"
@@ -1282,12 +1164,25 @@ const Modal = ({
               <div className="grid grid-cols-1 gap-4 sm:gap-6">
                 <input name="metaTitle" type="text" placeholder="Meta Title" className="input-primary" value={formData.metaTitle} onChange={handleChange} />
                 <textarea name="metaDescription" placeholder="Meta Description" className="input-primary h-20 resize-y" value={formData.metaDescription} onChange={handleChange} />
-                <input name="metaKeywords" type="text" placeholder="Meta Keywords (comma-separated)" className="input-primary" value={tempMetaKeywords} onChange={(e) => setTempMetaKeywords(e.target.value)} />
+                <input
+                  name="metaKeywords"
+                  type="text"
+                  placeholder="Meta Keywords (comma-separated)"
+                  className="input-primary"
+                  value={tempMetaKeywords}
+                  onChange={(e) => setTempMetaKeywords(e.target.value)}
+                />
                 <input name="ogTitle" type="text" placeholder="Open Graph Title" className="input-primary" value={formData.ogTitle} onChange={handleChange} />
                 <textarea name="ogDescription" placeholder="Open Graph Description" className="input-primary h-20 resize-y" value={formData.ogDescription} onChange={handleChange} />
                 <input name="ogImage" type="url" placeholder="Open Graph Image URL" className="input-primary" value={formData.ogImage} onChange={handleChange} />
                 <input name="canonicalUrl" type="url" placeholder="Canonical URL" className="input-primary" value={formData.canonicalUrl} onChange={handleChange} />
-                <textarea name="jsonLdSchema" placeholder="JSON-LD Schema (Structured Data)" className="input-primary h-24 resize-y font-mono text-sm" value={formData.jsonLdSchema} onChange={handleChange} />
+                <textarea
+                  name="jsonLdSchema"
+                  placeholder="JSON-LD Schema (Structured Data)"
+                  className="input-primary h-24 resize-y font-mono text-sm"
+                  value={formData.jsonLdSchema}
+                  onChange={handleChange}
+                />
               </div>
             </section>
 
@@ -1323,8 +1218,22 @@ const Modal = ({
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                 <input name="size" type="text" placeholder="Enter sizes (comma-separated)" className="input-primary" value={tempSizes} onChange={(e) => setTempSizes(e.target.value)} />
-                <input name="colorVariants" type="text" placeholder="Enter color variants (comma-separated)" className="input-primary" value={tempColorVariants} onChange={(e) => setTempColorVariants(e.target.value)} />
-                <input name="materialType" type="text" placeholder="Enter material types (comma-separated)" className="input-primary" value={tempMaterialType} onChange={(e) => setTempMaterialType(e.target.value)} />
+                <input
+                  name="colorVariants"
+                  type="text"
+                  placeholder="Enter color variants (comma-separated)"
+                  className="input-primary"
+                  value={tempColorVariants}
+                  onChange={(e) => setTempColorVariants(e.target.value)}
+                />
+                <input
+                  name="materialType"
+                  type="text"
+                  placeholder="Enter material types (comma-separated)"
+                  className="input-primary"
+                  value={tempMaterialType}
+                  onChange={(e) => setTempMaterialType(e.target.value)}
+                />
                 <input name="fabricFinish" type="text" placeholder="Fabric Finish" className="input-primary" value={formData.fabricFinish} onChange={handleChange} />
                 <div className="relative">
                   <select name="printingMethod" className="input-primary w-full pr-10 custom-select" value={formData.printingMethod} onChange={handleChange}>
@@ -1335,12 +1244,32 @@ const Modal = ({
                       </option>
                     ))}
                   </select>
-                  <svg className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg
+                    className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </div>
-                <input name="addOnOptions" type="text" placeholder="Add-On Options (comma-separated)" className="input-primary" value={tempAddOnOptions} onChange={(e) => setTempAddOnOptions(e.target.value)} />
-                <input name="variantCombinations" type="text" placeholder='Use format: "Desc::Price | Desc2::Price2"' className="input-primary" value={tempVariantCombinations} onChange={(e) => setTempVariantCombinations(e.target.value)} />
+                <input
+                  name="addOnOptions"
+                  type="text"
+                  placeholder="Add-On Options (comma-separated)"
+                  className="input-primary"
+                  value={tempAddOnOptions}
+                  onChange={(e) => setTempAddOnOptions(e.target.value)}
+                />
+                <input
+                  name="variantCombinations"
+                  type="text"
+                  placeholder='Use format: "Desc::Price | Desc2::Price2"'
+                  className="input-primary"
+                  value={tempVariantCombinations}
+                  onChange={(e) => setTempVariantCombinations(e.target.value)}
+                />
               </div>
             </section>
 
@@ -1364,9 +1293,7 @@ const Modal = ({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                       </svg>
                     </div>
-                    <p className="text-gray-500 text-sm">
-                      No custom attributes yet. Click "Add Attribute" to create one.
-                    </p>
+                    <p className="text-gray-500 text-sm">No custom attributes yet. Click "Add Attribute" to create one.</p>
                   </div>
                 )}
 
@@ -1387,7 +1314,11 @@ const Modal = ({
                             onChange={(e) => updateAttribute(attr.id, { name: e.target.value })}
                           />
                         </div>
-                        <button type="button" onClick={() => removeAttribute(attr.id)} className="btn-primary bg-red-600 hover:bg-red-700 text-xs px-2 py-1 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => removeAttribute(attr.id)}
+                          className="btn-primary bg-red-600 hover:bg-red-700 text-xs px-2 py-1 w-full sm:w-auto"
+                        >
                           Remove
                         </button>
                       </div>
@@ -1397,7 +1328,11 @@ const Modal = ({
                     <div className="p-4">
                       <div className="flex items-center justify-between mb-4">
                         <h4 className="font-medium text-gray-700 text-sm">Options ({attr.options.length})</h4>
-                        <button type="button" onClick={() => addOption(attr.id)} className="btn-primary bg-green-600 hover:bg-green-700 text-sm px-3 py-2 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => addOption(attr.id)}
+                          className="btn-primary bg-green-600 hover:bg-green-700 text-sm px-3 py-2 flex items-center gap-1"
+                        >
                           <span className="text-sm">+</span>
                           Add Option
                         </button>
@@ -1413,9 +1348,7 @@ const Modal = ({
                                   Option {optIndex + 1}
                                 </span>
                                 {opt.is_default && (
-                                  <span className="text-xs font-medium text-[#8B1C1C] bg-red-100 px-2 py-1 rounded">
-                                    Default
-                                  </span>
+                                  <span className="text-xs font-medium text-[#8B1C1C] bg-red-100 px-2 py-1 rounded">Default</span>
                                 )}
                               </div>
                               <button
@@ -1449,7 +1382,12 @@ const Modal = ({
                                         />
                                       ) : (
                                         <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={1.5}
+                                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                          />
                                         </svg>
                                       )}
                                     </div>
@@ -1499,7 +1437,7 @@ const Modal = ({
                                       >
                                         {opt.is_default && (
                                           <div className="w-full h-full flex items-center justify-center">
-                                            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                                            <div className="w-1.5 h-1.5 bg-white rounded-full" />
                                           </div>
                                         )}
                                       </div>
@@ -1518,9 +1456,7 @@ const Modal = ({
                                     className="input-primary w-full"
                                     placeholder="e.g., Single Sided, Large, Red"
                                     value={opt.label}
-                                    onChange={(e) =>
-                                      updateOption(attr.id, opt.id, { label: e.target.value })
-                                    }
+                                    onChange={(e) => updateOption(attr.id, opt.id, { label: e.target.value })}
                                   />
                                 </div>
 
@@ -1547,9 +1483,7 @@ const Modal = ({
                                   ) : (
                                     <>
                                       <label className="block text-xs font-medium text-gray-600 mb-1">Price Adjustment</label>
-                                      <div className="input-primary bg-gray-100 text-gray-500 flex items-center justify-center">
-                                        No adjustment
-                                      </div>
+                                      <div className="input-primary bg-gray-100 text-gray-500 flex items-center justify-center">No adjustment</div>
                                     </>
                                   )}
                                 </div>
@@ -1560,9 +1494,7 @@ const Modal = ({
 
                         {attr.options.length === 0 && (
                           <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg bg-gray-50/50">
-                            <p className="text-gray-500 text-sm">
-                              No options yet. Click "Add Option" to create the first one.
-                            </p>
+                            <p className="text-gray-500 text-sm">No options yet. Click "Add Option" to create the first one.</p>
                           </div>
                         )}
                       </div>
@@ -1578,8 +1510,22 @@ const Modal = ({
                 Additional Metadata
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                <input name="customTags" type="text" placeholder="Custom Tags (comma-separated)" className="input-primary" value={tempCustomTags} onChange={(e) => setTempCustomTags(e.target.value)} />
-                <input name="groupedFilters" type="text" placeholder="Grouped Filters (comma-separated)" className="input-primary" value={tempGroupedFilters} onChange={(e) => setTempGroupedFilters(e.target.value)} />
+                <input
+                  name="customTags"
+                  type="text"
+                  placeholder="Custom Tags (comma-separated)"
+                  className="input-primary"
+                  value={tempCustomTags}
+                  onChange={(e) => setTempCustomTags(e.target.value)}
+                />
+                <input
+                  name="groupedFilters"
+                  type="text"
+                  placeholder="Grouped Filters (comma-separated)"
+                  className="input-primary"
+                  value={tempGroupedFilters}
+                  onChange={(e) => setTempGroupedFilters(e.target.value)}
+                />
               </div>
             </section>
 
@@ -1589,29 +1535,37 @@ const Modal = ({
                 Shipping & Processing
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                <input name="processingTime" type="text" placeholder="Processing Time" className="input-primary" value={formData.processingTime} onChange={handleChange} />
-                <input name="shippingClass" type="text" placeholder="Enter shipping classes (comma-separated)" className="input-primary" value={tempShippingClass} onChange={(e) => setTempShippingClass(e.target.value)} />
+                <input
+                  name="processingTime"
+                  type="text"
+                  placeholder="Processing Time"
+                  className="input-primary"
+                  value={formData.processingTime}
+                  onChange={handleChange}
+                />
+                <input
+                  name="shippingClass"
+                  type="text"
+                  placeholder="Enter shipping classes (comma-separated)"
+                  className="input-primary"
+                  value={tempShippingClass}
+                  onChange={(e) => setTempShippingClass(e.target.value)}
+                />
               </div>
             </section>
 
             <div className="flex justify-center pt-2 mb-4">
-              <button type="submit" className="btn-primary">Save</button>
+              <button type="submit" className="btn-primary">
+                Save
+              </button>
             </div>
           </form>
         </div>
       </div>
 
       {isPreviewOpen && previewImages.length > 0 && (
-        <div
-          className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center"
-          role="dialog"
-          aria-modal="true"
-          onClick={closePreview}
-        >
-          <div
-            className="relative max-w-5xl w-[92vw] h-[82vh]"
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center" role="dialog" aria-modal="true" onClick={closePreview}>
+          <div className="relative max-w-5xl w-[92vw] h-[82vh]" onClick={(e) => e.stopPropagation()}>
             <img
               src={previewImages[activePreviewIndex].src}
               alt={`Preview ${activePreviewIndex + 1}`}
@@ -1620,11 +1574,7 @@ const Modal = ({
                 (e.currentTarget as HTMLImageElement).src = "/images/default.jpg";
               }}
             />
-            <button
-              onClick={closePreview}
-              aria-label="Close preview"
-              className="absolute top-2 right-2 text-white text-3xl leading-none"
-            >
+            <button onClick={closePreview} aria-label="Close preview" className="absolute top-2 right-2 text-white text-3xl leading-none">
               ×
             </button>
             {previewImages.length > 1 && (
