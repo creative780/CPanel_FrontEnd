@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation';
 import AdminAuthGuard from '../components/AdminAuthGaurd';
 import AdminSidebar from '../components/AdminSideBar';
 import { ToastContainer, toast } from 'react-toastify';
-import axios from 'axios';
-import { API_BASE_URL } from '../../utils/api';
 import 'react-toastify/dist/ReactToastify.css';
 
 export default function BlogAdminManager() {
@@ -18,30 +16,34 @@ export default function BlogAdminManager() {
   const router = useRouter();
 
   useEffect(() => {
-    fetchBlogs();
+    loadBlogs();
   }, []);
 
-  const fetchBlogs = async () => {
-    try {
-      const res = await axios.get(`${API_BASE_URL}/api/show-blogs/`);
-      setBlogs(res.data.blogs || []);
-    } catch (error) {
-      console.error(error);
-      toast.error('❌ Failed to fetch blogs');
-    }
+  const loadBlogs = () => {
+    const keys = JSON.parse(localStorage.getItem('blogKeys') || '[]');
+    const loadedBlogs = keys
+      .map((key) => {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : null;
+      })
+      .filter(Boolean);
+    setBlogs(loadedBlogs);
   };
 
-  const handleDelete = async (id: string) => {
-    // TODO: Replace with API call when delete endpoint is ready
-    toast.info('🧪 Delete feature is not yet implemented');
+  const handleDelete = (id: number) => {
+    localStorage.removeItem(`blog-${id}`);
+    const updatedKeys = JSON.parse(localStorage.getItem('blogKeys') || '[]').filter((k: string) => k !== `blog-${id}`);
+    localStorage.setItem('blogKeys', JSON.stringify(updatedKeys));
+    setBlogs((prev: any) => prev.filter((b: any) => b.id !== id));
+    toast.success('🗑️ Blog deleted');
   };
 
-  const handleEditSave = async () => {
-    // TODO: Replace with real edit endpoint
-    toast.info('🧪 Edit feature is not yet connected to backend');
+  const handleEditSave = () => {
+    localStorage.setItem(`blog-${editBlog.id}`, JSON.stringify(editBlog));
+    toast.success('✅ Blog updated');
     setEditMode(false);
     setEditBlog(null);
-    fetchBlogs();
+    loadBlogs();
   };
 
   return (
@@ -68,7 +70,7 @@ export default function BlogAdminManager() {
             onChange={(e) => setFilterCategory(e.target.value)}
           >
             <option value="">All Categories</option>
-            {[...new Set(blogs.flatMap((b: any) => b.categories))].map((cat, i) => (
+            {[...new Set(blogs.map((b: any) => b.category))].map((cat, i) => (
               <option key={i}>{cat}</option>
             ))}
           </select>
@@ -78,7 +80,7 @@ export default function BlogAdminManager() {
               <thead className="bg-[#891F1A] text-white sticky top-0">
                 <tr>
                   <th className="px-2 py-2 text-left">ID</th>
-                  <th className="px-2 py-2 text-left">Image</th>
+                  <th className="px-2 py-2 text-left">Thumbnail</th>
                   <th className="px-2 py-2 text-left">Title</th>
                   <th className="px-2 py-2 text-left">Author</th>
                   <th className="px-2 py-2 text-left">Category</th>
@@ -90,31 +92,31 @@ export default function BlogAdminManager() {
               </thead>
               <tbody>
                 {blogs
-                  .filter((b: any) => !filterCategory || b.categories.includes(filterCategory))
-                  .map((b: any) => (
-                    <tr key={b.blog_id}>
-                      <td className="px-2 py-2">{b.blog_id}</td>
+                  .filter((blog: any) => !filterCategory || blog.category === filterCategory)
+                  .map((blog: any) => (
+                    <tr key={blog.id}>
+                      <td className="px-2 py-2">{blog.id}</td>
                       <td className="px-2 py-2">
-                        <img src={b.blog_image} alt="thumb" className="w-12 h-12 object-cover rounded border" />
+                        <img src={blog.thumbnail} alt="thumb" className="w-12 h-12 object-cover rounded border" />
                       </td>
-                      <td className="px-2 py-2">{b.title}</td>
-                      <td className="px-2 py-2">{b.author_id}</td>
-                      <td className="px-2 py-2">{b.categories?.join(', ')}</td>
+                      <td className="px-2 py-2">{blog.title}</td>
+                      <td className="px-2 py-2">{blog.author}</td>
+                      <td className="px-2 py-2">{blog.category}</td>
                       <td className="px-2 py-2">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                          b.status === 'published'
+                          blog.status === 'Published'
                             ? 'bg-green-100 text-green-800'
                             : 'bg-yellow-100 text-yellow-800'
                         }`}>
-                          {b.status}
+                          {blog.status}
                         </span>
                       </td>
-                      <td className="px-2 py-2">{new Date(b.created_at).toLocaleString()}</td>
-                      <td className="px-2 py-2">{new Date(b.updated_at).toLocaleString()}</td>
+                      <td className="px-2 py-2">{blog.created}</td>
+                      <td className="px-2 py-2">{blog.updated}</td>
                       <td className="px-2 py-2 space-x-2">
-                        <button className="text-blue-600 hover:underline" onClick={() => setViewBlog(b)}>View</button>
-                        <button className="text-indigo-600 hover:underline" onClick={() => { setEditBlog(b); setEditMode(true); }}>Edit</button>
-                        <button className="text-red-600 hover:underline" onClick={() => handleDelete(b.blog_id)}>Delete</button>
+                        <button className="text-blue-600 hover:underline" onClick={() => setViewBlog(blog)}>View</button>
+                        <button className="text-indigo-600 hover:underline" onClick={() => { setEditBlog(blog); setEditMode(true); }}>Edit</button>
+                        <button className="text-red-600 hover:underline" onClick={() => handleDelete(blog.id)}>Delete</button>
                       </td>
                     </tr>
                   ))}
@@ -130,15 +132,15 @@ export default function BlogAdminManager() {
           <div className="bg-white text-black w-full max-w-3xl rounded-xl shadow-lg p-6 relative">
             <button className="absolute top-2 right-4 text-lg" onClick={() => setViewBlog(null)}>✖</button>
             <h2 className="text-2xl font-bold mb-2">{viewBlog.title}</h2>
-            <img src={viewBlog.blog_image} alt="thumb" className="w-48 h-32 rounded border mb-4" />
-            <p><strong>Author:</strong> {viewBlog.author_id}</p>
-            <p><strong>Category:</strong> {viewBlog.categories?.join(', ')}</p>
+            <img src={viewBlog.thumbnail} alt="thumb" className="w-48 h-32 rounded border mb-4" />
+            <p><strong>Author:</strong> {viewBlog.author}</p>
+            <p><strong>Category:</strong> {viewBlog.category}</p>
             <p><strong>Status:</strong> {viewBlog.status}</p>
-            <p><strong>Created:</strong> {new Date(viewBlog.created_at).toLocaleString()}</p>
-            <p><strong>Updated:</strong> {new Date(viewBlog.updated_at).toLocaleString()}</p>
+            <p><strong>Created:</strong> {viewBlog.created}</p>
+            <p><strong>Updated:</strong> {viewBlog.updated}</p>
             <div className="mt-4">
               <h3 className="font-semibold">Content:</h3>
-              <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: viewBlog.content }} />
+              <div className="text-sm text-black leading-relaxed whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: viewBlog.content }} />
             </div>
           </div>
         </div>
@@ -149,7 +151,7 @@ export default function BlogAdminManager() {
         <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-start justify-center p-6 overflow-auto">
           <div className="bg-white text-black w-full max-w-3xl rounded-xl shadow-lg p-6 relative">
             <button className="absolute top-2 right-4 text-lg" onClick={() => setEditMode(false)}>✖</button>
-            <h2 className="text-2xl font-bold mb-4">Edit Blog (coming soon)</h2>
+            <h2 className="text-2xl font-bold mb-4">Edit Blog</h2>
             <div className="space-y-3">
               <input
                 type="text"
@@ -165,8 +167,14 @@ export default function BlogAdminManager() {
               <input
                 type="text"
                 className="w-full px-4 py-2 border rounded bg-white text-black"
-                value={editBlog.author_id}
-                onChange={(e) => setEditBlog((prev: any) => ({ ...prev, author_id: e.target.value }))}
+                value={editBlog.author}
+                onChange={(e) => setEditBlog((prev: any) => ({ ...prev, author: e.target.value }))}
+              />
+              <input
+                type="text"
+                className="w-full px-4 py-2 border rounded bg-white text-black"
+                value={editBlog.category}
+                onChange={(e) => setEditBlog((prev: any) => ({ ...prev, category: e.target.value }))}
               />
               <button
                 className="bg-[#891F1A] text-white px-4 py-2 rounded"

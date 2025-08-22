@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import AdminSidebar from '../components/AdminSideBar';
 import AdminAuthGuard from '../components/AdminAuthGaurd';
 import { ToastContainer, toast } from 'react-toastify';
@@ -8,14 +8,13 @@ import 'react-toastify/dist/ReactToastify.css';
 import { FiSave } from 'react-icons/fi';
 import { MdOutlineArticle } from 'react-icons/md';
 import { Editor } from '@tinymce/tinymce-react';
-import axios from 'axios';
-import { API_BASE_URL } from '../../utils/api'; 
 export default function BlogManagementPage() {
   const [form, setForm] = useState({
     id: '',
     title: '',
     slug: '',
     content: '',
+    category: '',
     tags: '',
     author: '',
     featuredImage: '',
@@ -27,30 +26,19 @@ export default function BlogManagementPage() {
     publishDate: '',
     draft: true,
   });
-
-  const [categories, setCategories] = useState([]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [formTouched, setFormTouched] = useState(false);
-
-  useEffect(() => {
-    axios.get(`${API_BASE_URL}/api/show-categories/`)
-      .then(res => setCategories(res.data))
-      .catch(err => toast.error('❌ Failed to load categories'));
-  }, []);
 
   const handleChange = (e: any) => {
     const { name, value, type, checked, files } = e.target;
     setFormTouched(true);
 
-    if (type === 'file' && files && files.length > 0) {
+    if (type === 'file') {
       const file = files[0];
-      if (!file) return;
-
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
-        const compressed = await compressBase64Image(base64);
+        const compressed = await compressBase64Image(base64); // ✅ compress here
         setImagePreview(compressed);
         setForm(prev => ({
           ...prev,
@@ -65,39 +53,32 @@ export default function BlogManagementPage() {
       }));
     }
   };
-
-  const handleSubmit = async () => {
+  
+  const handleSubmit = () => {
     try {
-      if (!form.title || !form.content || !selectedCategoryId) {
-        return toast.error("❌ Title, Content, and Category are required");
+      const id = Date.now();
+      const blogWithId = {
+        ...form,
+        id,
+        status: form.draft ? 'Draft' : 'Published',
+        created: new Date().toISOString().split('T')[0],
+        updated: new Date().toISOString().split('T')[0],
+        thumbnail: form.featuredImage || './placeholder.jpg',
+      };
+      localStorage.setItem(`blog-${id}`, JSON.stringify(blogWithId));
+
+      const blogKeys = JSON.parse(localStorage.getItem('blogKeys') || '[]');
+      if (!blogKeys.includes(`blog-${id}`)) {
+        blogKeys.push(`blog-${id}`);
+        localStorage.setItem('blogKeys', JSON.stringify(blogKeys));
+        
       }
-
-const payload = {
-  title: form.title,
-  content: form.content,
-  blog_image: form.featuredImage || '',
-  schedule_date: form.publishDate || new Date().toISOString(),
-  status: form.draft ? 'draft' : 'published',
-  author_id: form.author || 'admin-user',
-  author_type: 'admin',
-  category_ids: [selectedCategoryId],
-  meta_title: form.metaTitle || '',
-  meta_description: form.metaDescription || '',
-  og_title: form.ogTitle || '',
-  og_image: form.ogImage || '',
-  tags: form.tags || '',
-  schema_enabled: form.schemaEnabled || false,
-};
-
-      await axios.post(`${API_BASE_URL}/api/save-blog/`, payload);
-      toast.success('✅ Blog saved to backend!');
+      toast.success('✅ Blog post saved!');
       setFormTouched(false);
-    } catch (error) {
-      console.error(error);
-      toast.error('❌ Failed to save blog');
+    } catch (e) {
+      toast.error('❌ Storage limit reached. Try compressing more or switch to IndexedDB.');
     }
   };
-
   const handleSchedule = () => {
     if (!form.publishDate || new Date(form.publishDate) <= new Date()) {
       return toast.error('❌ Enter a valid future date.');
@@ -106,6 +87,7 @@ const payload = {
     handleSubmit();
   };
 
+  
   return (
     <AdminAuthGuard>
       <div className="flex">
@@ -137,7 +119,7 @@ const payload = {
               <InputField label="Title" name="title" value={form.title} onChange={handleChange} />
               <InputField label="Slug" name="slug" value={form.slug} onChange={handleChange} />
               <Editor
-                apiKey="zs8rqsn41i2usr3knpwlz0ti1e6sz2gbdcr0e338jdji2iob"
+                apiKey=""
                 value={form.content}
                 init={{
                   height: 400,
@@ -149,19 +131,7 @@ const payload = {
               />
 
               <div className="grid md:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 block mb-1">Category</label>
-                  <select
-                    value={selectedCategoryId}
-                    onChange={(e) => setSelectedCategoryId(e.target.value)}
-                    className="w-full px-4 py-2 border rounded bg-gray-50"
-                  >
-                    <option value="">Select Category</option>
-                    {categories.map((cat: any) => (
-                      <option key={cat.id} value={cat.id}>{cat.name}</option>
-                    ))}
-                  </select>
-                </div>
+                <InputField label="Category" name="category" value={form.category} onChange={handleChange} />
                 <InputField label="Tags" name="tags" value={form.tags} onChange={handleChange} />
                 <InputField label="Author" name="author" value={form.author} onChange={handleChange} />
               </div>
@@ -190,6 +160,7 @@ const payload = {
                     value={form.publishDate}
                     onChange={handleChange}
                     className="w-full px-4 py-2 border rounded"
+                    
                   />
                 </div>
               </div>
@@ -227,7 +198,6 @@ function CheckboxField({ label, name, checked, onChange }: any) {
     </div>
   );
 }
-
 // ✅ Compress base64 image before saving
 async function compressBase64Image(base64: string, maxWidth = 800, quality = 0.6): Promise<string> {
   return new Promise((resolve) => {

@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
 import React, { useEffect, useState } from "react";
-import axios from "axios";
-import Header from "../components/header";
+import Image from "next/image";
+import Link from "next/link";
 import Navbar from "../components/Navbar";
+import Header from "../components/header";
 import MobileTopBar from "../components/HomePageTop";
 import LogoSection from "../components/LogoSection";
 import Footer from "../components/Footer";
-import { API_BASE_URL } from "../utils/api";
 
 const fallbackPosts = [
   {
@@ -48,29 +48,21 @@ export default function BlogPage() {
   const [blogs, setBlogs] = useState([]);
 
   useEffect(() => {
-    axios
-      .get(`${API_BASE_URL}/api/show-blogs/`)
-      .then((res) => {
-        if (Array.isArray(res.data.blogs) && res.data.blogs.length > 0) {
-          // Normalize thumbnail + category
-          const normalized = res.data.blogs.map((b: any) => ({
-            id: b.blog_id,
-            title: b.title,
-            description: b.metaDescription || b.content?.slice(0, 150) || "",
-            thumbnail: b.blog_image,
-            category: b.categories?.[0] || "General",
-            metaDescription: b.metaDescription || "",
-          }));
-          setBlogs(normalized.reverse()); // Newest first
-        } else {
-          setBlogs(fallbackPosts);
-        }
-      })
-      .catch(() => setBlogs(fallbackPosts));
+    if (typeof window !== "undefined") {
+      const keys = JSON.parse(localStorage.getItem("blogKeys") || "[]");
+      const loaded = keys
+        .map((key) => {
+          const item = localStorage.getItem(key);
+          return item ? JSON.parse(item) : null;
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.id - a.id);
+      setBlogs(loaded.length > 0 ? loaded : fallbackPosts);
+    }
   }, []);
 
-  const featured = blogs[0];
-  const others = blogs.slice(1);
+  const featured = blogs[blogs.length - 1];
+  const others = blogs.slice(0, -1).reverse(); // show newest at the top
 
   return (
     <div className="flex flex-col bg-white">
