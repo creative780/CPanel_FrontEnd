@@ -371,8 +371,8 @@ export default function AdminProductManager() {
         images: (product.images || []).map((img: any) => (typeof img === 'string' ? img : img.value)),
       };
 
-      const res = await fetch(`${API_BASE_URL}/api/edit-product/${product.id}/`, withFrontendKey({
-        method: 'PUT',
+      const res = await fetch(`${API_BASE_URL}/api/edit-product/`, withFrontendKey({
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }));

@@ -10,18 +10,28 @@ type AttributeOption = {
   label: string;
   price_delta: number; // AED
   is_default?: boolean;
+
+  // Keep reference to existing image from backend
+  image_id?: string | null;
+
   // UI-only fields for handling file uploads:
   _image_file?: File | null;
   _image_preview?: string | null;
-  // Will be sent to backend as base64 (set on submit)
+
+  // Will be sent to backend as base64 if user replaces image
   image?: string | null;
 };
 
 type CustomAttribute = {
   id: string;
   name: string;
-  // type removed — all act like "select"
   options: AttributeOption[];
+};
+
+type ModalImage = {
+  src: string;
+  file?: File | null;
+  kind: "file" | "url" | "data";
 };
 
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
@@ -58,12 +68,6 @@ const addLowStockNotification = (
     "notifications",
     JSON.stringify([newNotification, ...existing])
   );
-};
-
-type ModalImage = {
-  src: string;
-  file?: File | null;
-  kind: "file" | "url" | "data";
 };
 
 const urlForDisplay = (src: string): string => {
@@ -121,42 +125,10 @@ const Modal = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activePreviewIndex, setActivePreviewIndex] = useState(0);
 
-  // Custom attributes state (type removed)
+  // Attributes
   const [customAttributes, setCustomAttributes] = useState<CustomAttribute[]>(
     []
   );
-
-  const openPreviewAt = useCallback(
-    (idx: number) => {
-      if (previewImages.length === 0) return;
-      setActivePreviewIndex(idx);
-      setIsPreviewOpen(true);
-    },
-    [previewImages.length]
-  );
-
-  const closePreview = useCallback(() => setIsPreviewOpen(false), []);
-  const nextPreview = useCallback(() => {
-    setActivePreviewIndex((i) => (i + 1) % Math.max(previewImages.length, 1));
-  }, [previewImages.length]);
-  const prevPreview = useCallback(() => {
-    setActivePreviewIndex(
-      (i) =>
-        (i - 1 + Math.max(previewImages.length, 1)) %
-        Math.max(previewImages.length, 1)
-    );
-  }, [previewImages.length]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPreviewOpen) return;
-      if (e.key === "Escape") closePreview();
-      if (e.key === "ArrowRight") nextPreview();
-      if (e.key === "ArrowLeft") prevPreview();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [isPreviewOpen, closePreview, nextPreview, prevPreview]);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [subcategories, setSubcategories] = useState<any[]>([]);
@@ -208,6 +180,8 @@ const Modal = ({
   });
 
   const [errors, setErrors] = useState<any>({});
+
+  // Controlled “comma-separated” fields used by inputs
   const [tempMetaKeywords, setTempMetaKeywords] = useState("");
   const [tempSizes, setTempSizes] = useState("");
   const [tempColorVariants, setTempColorVariants] = useState("");
@@ -217,6 +191,27 @@ const Modal = ({
   const [tempGroupedFilters, setTempGroupedFilters] = useState("");
   const [tempShippingClass, setTempShippingClass] = useState("");
   const [tempVariantCombinations, setTempVariantCombinations] = useState("");
+
+  const openPreviewAt = useCallback(
+    (idx: number) => {
+      if (previewImages.length === 0) return;
+      setActivePreviewIndex(idx);
+      setIsPreviewOpen(true);
+    },
+    [previewImages.length]
+  );
+
+  const closePreview = useCallback(() => setIsPreviewOpen(false), []);
+  const nextPreview = useCallback(() => {
+    setActivePreviewIndex((i) => (i + 1) % Math.max(previewImages.length, 1));
+  }, [previewImages.length]);
+  const prevPreview = useCallback(() => {
+    setActivePreviewIndex(
+      (i) =>
+        (i - 1 + Math.max(previewImages.length, 1)) %
+        Math.max(previewImages.length, 1)
+    );
+  }, [previewImages.length]);
 
   const categoryName = useMemo(() => {
     if (!formData.category) return "";
@@ -235,6 +230,7 @@ const Modal = ({
     return found?.name || "";
   }, [subcategories, formData.subcategory, selectedSubcategories]);
 
+  // Reset state when productId is cleared (Add mode)
   useEffect(() => {
     if (!productId) {
       setFormData({
@@ -281,72 +277,94 @@ const Modal = ({
       setTempCustomTags("");
       setTempGroupedFilters("");
       setTempShippingClass("");
+      setTempVariantCombinations("");
       setPreviewImages([]);
       setSelectedCategories([]);
       setSelectedSubcategories([]);
-      setCustomAttributes([]); // reset
+      setCustomAttributes([]);
       return;
     }
+
+    // ---- EDIT MODE: fetch all product pieces (including attributes) ----
     const fetchDetails = async () => {
       try {
-        const [basicRes, seoRes, variantRes, shipRes, otherRes, comboRes] =
-          await Promise.all([
-            fetch(
-              `${API_BASE_URL}/api/show_specific_product/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-            fetch(
-              `${API_BASE_URL}/api/show_product_seo/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-            fetch(
-              `${API_BASE_URL}/api/show_product_variant/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-            fetch(
-              `${API_BASE_URL}/api/show_product_shipping_info/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-            fetch(
-              `${API_BASE_URL}/api/show_product_other_details/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-            fetch(
-              `${API_BASE_URL}/api/show_product_variants/`,
-              withFrontendKey({
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ product_id: productId }),
-              })
-            ),
-          ]);
+        const [
+          basicRes,
+          seoRes,
+          variantRes,
+          shipRes,
+          otherRes,
+          comboRes,
+          attrRes,
+        ] = await Promise.all([
+          fetch(
+            `${API_BASE_URL}/api/show_specific_product/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          fetch(
+            `${API_BASE_URL}/api/show_product_seo/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          fetch(
+            `${API_BASE_URL}/api/show_product_variant/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          fetch(
+            `${API_BASE_URL}/api/show_product_shipping_info/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          fetch(
+            `${API_BASE_URL}/api/show_product_other_details/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          fetch(
+            `${API_BASE_URL}/api/show_product_variants/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+          // NEW: attributes
+          fetch(
+            `${API_BASE_URL}/api/show_product_attributes/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ product_id: productId }),
+            })
+          ),
+        ]);
+
         const basic = await basicRes.json();
         const seo = await seoRes.json();
         const variant = await variantRes.json();
         const shipping = await shipRes.json();
         const other = await otherRes.json();
         const combos = await comboRes.json();
+        const attrs = await attrRes.json();
 
+        // Primary form data
         setFormData((prev: any) => ({
           ...prev,
           title: basic.name || "",
@@ -359,7 +377,7 @@ const Modal = ({
           videoUrl: basic.video_url || "",
           metaTitle: seo.meta_title || "",
           metaDescription: seo.meta_description || "",
-          metaKeywords: "",
+          metaKeywords: "", // we use tempMetaKeywords for the input
           ogTitle: seo.open_graph_title || "",
           ogDescription: seo.open_graph_desc || "",
           ogImage: seo.open_graph_image_url || "",
@@ -385,7 +403,44 @@ const Modal = ({
           shippingClass: (shipping.shipping_class || "").split(","),
         }));
 
-        // images preview
+        // Prefill the "temp" string fields for view/edit
+        setTempMetaKeywords(
+          Array.isArray(seo.meta_keywords) ? seo.meta_keywords.join(", ") : ""
+        );
+        setTempCustomTags(
+          Array.isArray(seo.custom_tags) ? seo.custom_tags.join(", ") : ""
+        );
+        setTempGroupedFilters(
+          Array.isArray(seo.grouped_filters)
+            ? seo.grouped_filters.join(", ")
+            : ""
+        );
+        setTempSizes(Array.isArray(variant.sizes) ? variant.sizes.join(", ") : "");
+        setTempColorVariants(
+          Array.isArray(variant.color_variants)
+            ? variant.color_variants.join(", ")
+            : ""
+        );
+        setTempMaterialType(
+          Array.isArray(variant.material_types)
+            ? variant.material_types.join(", ")
+            : ""
+        );
+        setTempAddOnOptions(
+          Array.isArray(variant.add_on_options)
+            ? variant.add_on_options.join(", ")
+            : ""
+        );
+        setTempShippingClass(shipping.shipping_class || "");
+        setTempVariantCombinations(
+          Array.isArray(combos.variant_combinations)
+            ? combos.variant_combinations
+                .map((c: any) => `${c.description}::${c.price_override}`)
+                .join(" | ")
+            : ""
+        );
+
+        // Images (preserve & display)
         const existingArray = Array.isArray(other.images)
           ? other.images
           : other.images
@@ -411,43 +466,29 @@ const Modal = ({
         if (other.subcategory_ids?.length > 0)
           setSelectedSubcategories(other.subcategory_ids);
 
-        // Prefill custom attributes (type removed)
-        if (Array.isArray(other.custom_attributes)) {
-          const normalized: CustomAttribute[] = other.custom_attributes.map(
-            (a: any) => ({
-              id: crypto.randomUUID(),
-              name: String(a?.name || ""),
-              options: Array.isArray(a?.options)
-                ? a.options.map((o: any) => {
-                    const maybeUrl =
-                      typeof o?.image === "string" &&
-                      o.image.startsWith("http");
-                    return {
-                      id: crypto.randomUUID(),
-                      label: String(o?.label || ""),
-                      price_delta: Number(o?.price_delta) || 0,
-                      is_default: !!o?.is_default,
-                      _image_file: null,
-                      _image_preview: maybeUrl ? o.image : null,
-                      image:
-                        !maybeUrl && typeof o?.image === "string"
-                          ? o.image
-                          : null,
-                    } as AttributeOption;
-                  })
-                : [
-                    {
-                      id: crypto.randomUUID(),
-                      label: "",
-                      price_delta: 0,
-                      is_default: true,
-                      _image_file: null,
-                      _image_preview: null,
-                      image: null,
-                    },
-                  ],
-            })
-          );
+        // Attributes (this replaces the old dummy block)
+        if (Array.isArray(attrs)) {
+          const normalized: CustomAttribute[] = attrs.map((a: any) => ({
+            id: String(a?.id || crypto.randomUUID()),
+            name: String(a?.name || ""),
+            options: Array.isArray(a?.options)
+              ? a.options.map((o: any) => ({
+                  id: String(o?.id || crypto.randomUUID()),
+                  label: String(o?.label || ""),
+                  price_delta:
+                    typeof o?.price_delta === "number"
+                      ? o.price_delta
+                      : o?.price_delta
+                      ? parseFloat(o.price_delta)
+                      : 0,
+                  is_default: !!o?.is_default,
+                  image_id: o?.image_id || null,
+                  _image_file: null,
+                  _image_preview: o?.image_url ? urlForDisplay(o.image_url) : null,
+                  image: null,
+                }))
+              : [],
+          }));
           setCustomAttributes(normalized);
         } else {
           setCustomAttributes([]);
@@ -457,9 +498,11 @@ const Modal = ({
         console.error("Fetch product detail error:", err);
       }
     };
+
     fetchDetails();
   }, [productId]);
 
+  // Static lists (categories/subcategories)
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -489,10 +532,11 @@ const Modal = ({
 
   useEffect(() => setIsEditMode(!!productId), [productId]);
 
+  // Auto-set category if a subcategory is preselected
   useEffect(() => {
     if (formData.subcategory && !formData.category) {
       const selectedSub = subcategories.find(
-        (s) => s.id.toString() === formData.subcategory.toString()
+        (s) => s.id?.toString() === formData.subcategory?.toString()
       );
       if (selectedSub && selectedSub.categories?.length > 0) {
         const firstName = selectedSub.categories[0];
@@ -506,18 +550,20 @@ const Modal = ({
     }
   }, [formData.subcategory, formData.category, subcategories, categories]);
 
+  // Stock status helper (optional parity with backend copy)
   useEffect(() => {
     const qty = parseInt(formData.stockQuantity);
     const alert = parseInt(formData.lowStockAlert);
-    let status = "";
+    let status = formData.stockStatus;
     if (!isNaN(qty) && !isNaN(alert)) {
-      if (qty === 0) status = "No Stock";
+      if (qty === 0) status = "Out Of Stock";
       else if (qty <= alert) status = "Low Stock";
       else status = "In Stock";
       setFormData((prev: any) => ({ ...prev, stockStatus: status }));
     }
   }, [formData.stockQuantity, formData.lowStockAlert]);
 
+  // Auto SKU on add
   useEffect(() => {
     const generateSku = async () => {
       if (!formData.title.trim() || !formData.subcategory || isEditMode) return;
@@ -545,6 +591,7 @@ const Modal = ({
 
   useEffect(() => setIsMounted(true), []);
 
+  // Revoke blob URLs
   useEffect(() => {
     return () => {
       previewImages.forEach((img) => {
@@ -652,24 +699,14 @@ const Modal = ({
           )
         );
 
-  // ======= Custom Attributes helpers (type removed) =======
+  // ======= Attribute helper actions =======
   const addAttribute = () => {
     setCustomAttributes((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         name: "",
-        options: [
-          {
-            id: crypto.randomUUID(),
-            label: "",
-            price_delta: 0,
-            is_default: true,
-            _image_file: null,
-            _image_preview: null,
-            image: null,
-          },
-        ],
+        options: [],
       },
     ]);
   };
@@ -696,10 +733,11 @@ const Modal = ({
                   id: crypto.randomUUID(),
                   label: "",
                   price_delta: 0,
-                  is_default: false,
+                  is_default: a.options.length === 0, // first option defaults
                   _image_file: null,
                   _image_preview: null,
                   image: null,
+                  image_id: null,
                 },
               ],
             }
@@ -737,7 +775,7 @@ const Modal = ({
     );
   };
 
-  // When setting default: mark selected as default AND force price_delta to 0, others lose default (keep their price values)
+  // Mark one default per attribute
   const setDefaultOption = (attrId: string, optId: string) => {
     setCustomAttributes((prev) =>
       prev.map((a) =>
@@ -761,17 +799,21 @@ const Modal = ({
     file: File | null
   ) => {
     if (!file) {
-      // clear
       return updateOption(attrId, optId, {
         _image_file: null,
         _image_preview: null,
         image: null,
+        image_id: null,
       });
     }
     const preview = URL.createObjectURL(file);
-    updateOption(attrId, optId, { _image_file: file, _image_preview: preview });
+    updateOption(attrId, optId, {
+      _image_file: file,
+      _image_preview: preview,
+      image_id: null, // replacing existing image ref
+    });
   };
-  // ========================================================
+  // ========================================
 
   const handleSubmit = async (e: any) => {
     e.preventDefault();
@@ -781,6 +823,7 @@ const Modal = ({
       toast.error("Please correct the highlighted fields.");
       return;
     }
+
     const finalSubcategoryIds = [
       ...new Set(
         [...selectedSubcategories, formData.subcategory].filter(Boolean)
@@ -790,9 +833,12 @@ const Modal = ({
       toast.error("Please select at least one subcategory.");
       return;
     }
+
     let toastId: any;
     try {
       toastId = toast.loading("Saving product...");
+
+      // Product images
       const imagesBase64: string[] = [];
       for (const img of previewImages) {
         if (img.kind === "file" && img.file) {
@@ -811,11 +857,13 @@ const Modal = ({
         );
         return;
       }
+
       const cleanCommaArray = (val: string) =>
         val
           .split(",")
           .map((v) => v.trim())
           .filter(Boolean);
+
       const parsedCombinations = String(tempVariantCombinations || "")
         .split("|")
         .map((entry) => entry.trim())
@@ -825,29 +873,33 @@ const Modal = ({
           return { description, price_override: parseFloat(price) || 0 };
         });
 
-      // Convert each attribute option image file to base64 (if any)
-      const attrsForPayload = [];
+      // Build attributes payload (preserve existing images by id)
+      const attrsForPayload: any[] = [];
       for (const a of customAttributes) {
         const opts: any[] = [];
         for (const o of a.options) {
           let imageBase64 = o.image || null;
+          let imageId = o.image_id || null;
+
           if (o._image_file) {
             imageBase64 = await fileToBase64(o._image_file);
+            imageId = null; // we are replacing the image
           }
+
           opts.push({
+            id: o.id, // keep existing option id if available
             label: o.label,
             price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
             is_default: !!o.is_default,
-            image: imageBase64, // base64 or null
+            image_id: imageId,
+            image: imageBase64, // base64 if changed, else null
           });
         }
-        // enforce single default if none selected
         if (opts.length > 0 && !opts.some((x) => x.is_default)) {
-          // make first one default and zero price
           opts[0].is_default = true;
           opts[0].price_delta = 0;
         }
-        attrsForPayload.push({ name: a.name, options: opts });
+        attrsForPayload.push({ id: a.id, name: a.name, options: opts });
       }
 
       const payload: any = {
@@ -864,7 +916,7 @@ const Modal = ({
         status: "active",
         quantity: parseInt(formData.stockQuantity) || 0,
         low_stock_alert: parseInt(formData.lowStockAlert) || 0,
-        stock_status: formData.stockStatus || "in stock",
+        stock_status: formData.stockStatus || "In Stock",
         category_ids: selectedCategories,
         subcategory_ids: finalSubcategoryIds,
         images: imagesBase64,
@@ -888,8 +940,8 @@ const Modal = ({
         customTags: cleanCommaArray(tempCustomTags),
         groupedFilters: cleanCommaArray(tempGroupedFilters),
 
-        // attributes with option images
-        custom_attributes: attrsForPayload,
+        // IMPORTANT: backend expects camelCase here
+        customAttributes: attrsForPayload,
       };
 
       const res = await fetch(
@@ -900,10 +952,12 @@ const Modal = ({
           body: JSON.stringify(payload),
         })
       );
+
       let result: any = {};
       try {
         result = await res.json();
       } catch {}
+
       toast.dismiss(toastId);
       if (res.ok) {
         toast.success("Product saved successfully!");
@@ -1374,7 +1428,7 @@ const Modal = ({
                 <input
                   name="stockStatus"
                   type="text"
-                  placeholder="Stock Status (in stock/out of stock)"
+                  placeholder="Stock Status"
                   className="input-primary"
                   value={formData.stockStatus}
                   onChange={handleChange}
@@ -1452,7 +1506,7 @@ const Modal = ({
                 <input
                   name="addOnOptions"
                   type="text"
-                  placeholder="Add-On Options"
+                  placeholder="Add-On Options (comma-separated)"
                   className="input-primary"
                   value={tempAddOnOptions}
                   onChange={(e) => setTempAddOnOptions(e.target.value)}
@@ -1460,7 +1514,7 @@ const Modal = ({
                 <input
                   name="variantCombinations"
                   type="text"
-                  placeholder='Use format: "Size::Price | Size2::Price2"'
+                  placeholder='Use format: "Desc::Price | Desc2::Price2"'
                   className="input-primary"
                   value={tempVariantCombinations}
                   onChange={(e) => setTempVariantCombinations(e.target.value)}
@@ -1468,8 +1522,7 @@ const Modal = ({
               </div>
             </section>
 
-            {/* Custom Attributes (with option images) */}
-{/* Custom Attributes (with option images) */}
+            {/* Custom Attributes */}
             <section>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg sm:text-xl font-semibold border-b border-gray-200 pb-2 text-[#8B1C1C] flex-1">
@@ -1489,12 +1542,23 @@ const Modal = ({
                 {customAttributes.length === 0 && (
                   <div className="text-center py-12 border-2 border-dashed border-gray-300 rounded-xl bg-gray-50/50">
                     <div className="w-16 h-16 mx-auto mb-4 bg-gray-200 rounded-full flex items-center justify-center">
-                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                      <svg
+                        className="w-8 h-8 text-gray-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={1.5}
+                          d="M12 4v16m8-8H4"
+                        />
                       </svg>
                     </div>
                     <p className="text-gray-500 text-sm">
-                      No custom attributes yet. Click "Add Attribute" to create your first one.
+                      No custom attributes yet. Click "Add Attribute" to create
+                      one.
                     </p>
                   </div>
                 )}
@@ -1514,7 +1578,7 @@ const Modal = ({
                           <input
                             type="text"
                             className="input-primary flex-1 bg-white"
-                            placeholder="Attribute name (e.g., Print Type, Size, Color)"
+                            placeholder="Attribute name (e.g., Size, Color, Print Type)"
                             value={attr.name}
                             onChange={(e) =>
                               updateAttribute(attr.id, { name: e.target.value })
@@ -1571,23 +1635,31 @@ const Modal = ({
                                 className="text-gray-400 hover:text-red-600 transition-colors p-1"
                                 title="Remove option"
                               >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                <svg
+                                  className="w-4 h-4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M6 18L18 6M6 6l12 12"
+                                  />
                                 </svg>
                               </button>
                             </div>
 
                             {/* Option Content */}
                             <div className="space-y-4">
-                              {/* Top Row: Image and Default Radio */}
                               <div className="flex items-start gap-4">
-                                {/* Image Section */}
+                                {/* Image section */}
                                 <div className="space-y-2">
                                   <label className="block text-xs font-medium text-gray-600">
                                     Option Image
                                   </label>
                                   <div className="flex items-center gap-4">
-                                    {/* Image Preview */}
                                     <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 overflow-hidden bg-white flex items-center justify-center shrink-0">
                                       {opt._image_preview ? (
                                         <img
@@ -1596,16 +1668,25 @@ const Modal = ({
                                           className="w-full h-full object-cover"
                                         />
                                       ) : (
-                                        <svg className="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                        <svg
+                                          className="w-8 h-8 text-gray-300"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          viewBox="0 0 24 24"
+                                        >
+                                          <path
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            strokeWidth={1.5}
+                                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                          />
                                         </svg>
                                       )}
                                     </div>
 
-                                    {/* Image Controls - Now centered vertically */}
                                     <div className="flex items-center gap-3 h-20">
                                       <label className="btn-primary cursor-pointer py-2 px-3 text-xs text-center">
-                                        {opt._image_preview ? 'Change' : 'Upload'}
+                                        {opt._image_preview ? "Change" : "Upload"}
                                         <input
                                           type="file"
                                           accept="image/*"
@@ -1643,7 +1724,7 @@ const Modal = ({
                                   </div>
                                 </div>
 
-                                {/* Default Radio - positioned to the right */}
+                                {/* Default radio */}
                                 <div className="flex-1 flex justify-end">
                                   <label className="inline-flex items-center gap-2 cursor-pointer">
                                     <div className="relative">
@@ -1656,11 +1737,13 @@ const Modal = ({
                                         }
                                         className="sr-only"
                                       />
-                                      <div className={`w-4 h-4 rounded-full border-2 transition-colors ${
-                                        opt.is_default 
-                                          ? 'border-[#8B1C1C] bg-[#8B1C1C]' 
-                                          : 'border-gray-300 bg-white'
-                                      }`}>
+                                      <div
+                                        className={`w-4 h-4 rounded-full border-2 transition-colors ${
+                                          opt.is_default
+                                            ? "border-[#8B1C1C] bg-[#8B1C1C]"
+                                            : "border-gray-300 bg-white"
+                                        }`}
+                                      >
                                         {opt.is_default && (
                                           <div className="w-full h-full flex items-center justify-center">
                                             <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
@@ -1675,9 +1758,8 @@ const Modal = ({
                                 </div>
                               </div>
 
-                              {/* Bottom Row: Label and Price */}
+                              {/* Label & price */}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                {/* Label Input */}
                                 <div>
                                   <label className="block text-xs font-medium text-gray-600 mb-1">
                                     Option Label *
@@ -1695,7 +1777,6 @@ const Modal = ({
                                   />
                                 </div>
 
-                                {/* Price Delta */}
                                 <div>
                                   {!opt.is_default ? (
                                     <>
@@ -1741,7 +1822,8 @@ const Modal = ({
                         {attr.options.length === 0 && (
                           <div className="text-center py-8 border border-dashed border-gray-300 rounded-lg bg-gray-50/50">
                             <p className="text-gray-500 text-sm">
-                              No options added yet. Click "Add Option" to create the first one.
+                              No options yet. Click "Add Option" to create the
+                              first one.
                             </p>
                           </div>
                         )}
@@ -1761,7 +1843,7 @@ const Modal = ({
                 <input
                   name="customTags"
                   type="text"
-                  placeholder="Custom Tags"
+                  placeholder="Custom Tags (comma-separated)"
                   className="input-primary"
                   value={tempCustomTags}
                   onChange={(e) => setTempCustomTags(e.target.value)}
@@ -1769,7 +1851,7 @@ const Modal = ({
                 <input
                   name="groupedFilters"
                   type="text"
-                  placeholder="Grouped Filters"
+                  placeholder="Grouped Filters (comma-separated)"
                   className="input-primary"
                   value={tempGroupedFilters}
                   onChange={(e) => setTempGroupedFilters(e.target.value)}
@@ -1846,7 +1928,7 @@ const Modal = ({
                 <button
                   onClick={nextPreview}
                   aria-label="Next image"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-2xl px-3 py-2 bg-black/40 rounded-full"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-2xl px-3 py-2 bg-black/40 rounded-full"
                 >
                   ›
                 </button>

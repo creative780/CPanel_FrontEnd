@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Minus, Plus, Trash2 } from 'lucide-react';
 import Toastify from 'toastify-js';
-import Image from 'next/image';
 import 'toastify-js/src/toastify.css';
 
 import Header from '../components/header';
@@ -14,9 +13,9 @@ import Footer from '../components/Footer';
 import { API_BASE_URL } from '../utils/api';
 import { ChatBot } from '../components/ChatBot';
 
-type ProductTuple = [string, string, string, number, string]; // [id, name, image, price, alt]
+type ProductTuple = [string, string, string, number, string]; // [rowId, name, image, unitPrice, desc]
 
-/** 🔐 Inject X-Frontend-Key on every request */
+// 🔐 Inject X-Frontend-Key on every request
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
 const fetchWithKey = (url: string, init: RequestInit = {}) => {
   const headers = new Headers(init.headers || {});
@@ -24,12 +23,42 @@ const fetchWithKey = (url: string, init: RequestInit = {}) => {
   return fetch(url, { ...init, headers });
 };
 
+type HumanAttr = {
+  attribute_id?: string;
+  option_id?: string;
+  attribute_name: string;
+  option_label: string;
+  price_delta: string; // "0.00" from backend
+};
+
 export default function PaymentCheckoutPage() {
   const router = useRouter();
+
   const [cartData, setCartData] = useState<{ products: ProductTuple[] }>({ products: [] });
   const [loading, setLoading] = useState(true);
+
+  // quantity and price keyed by our internal row id (cart_item_id if present, else product_id|signature)
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+
+  // extra metadata we’ll pass to the order payload (not shown in UI)
+  const [cartMeta, setCartMeta] = useState<
+    Record<
+      string,
+      {
+        cart_item_id?: string;
+        product_id: string;                      // real product id for backend
+        selected_size?: string;
+        selected_attributes?: Record<string, string>;
+        selected_attributes_human?: HumanAttr[];
+        variant_signature?: string;
+        attributes_price_delta?: number;
+        base_price?: number;
+        line_total?: number;
+      }
+    >
+  >({});
+
   const [discountCode, setDiscountCode] = useState('');
   const [userInfo, setUserInfo] = useState({
     name: '', email: '', phone: '', company: '',
@@ -52,6 +81,8 @@ export default function PaymentCheckoutPage() {
 
     const fetchCart = async () => {
       try {
+        setLoading(true);
+
         const res = await fetchWithKey(`${API_BASE_URL}/api/show-cart/`, {
           method: 'POST',
           headers: {
@@ -59,30 +90,79 @@ export default function PaymentCheckoutPage() {
             'X-Device-UUID': deviceUUID,
           },
           body: JSON.stringify({ device_uuid: deviceUUID }),
+          cache: 'no-store',
         });
 
         const data = await res.json();
         const items = data?.cart_items || [];
+
         const q: Record<string, number> = {};
         const p: Record<string, number> = {};
         const prod: ProductTuple[] = [];
+        const meta: typeof cartMeta = {};
 
         for (const item of items) {
-          const id = item.product_id;
-          q[id] = item.quantity || 1;
-          p[id] = parseFloat(item.product_price) || 0;
+          const cartItemId = item.cart_item_id;
+          const productId = item.product_id;
+          const signature = item.variant_signature || '';
+
+          // Robust unique row id
+          const rowId: string = cartItemId || `${productId}${signature ? `|${signature}` : ''}`;
+
+          const unitPriceStr =
+            item?.price_breakdown?.unit_price ??
+            item?.unit_price ??
+            item?.product_price ??
+            '0';
+          const unitPriceNum = parseFloat(unitPriceStr) || 0;
+
+          // Merge human-readable selections for the small line under product name
+          const size = (item.selected_size || '').toString().trim();
+          const human: HumanAttr[] = Array.isArray(item.selected_attributes_human)
+            ? item.selected_attributes_human
+            : [];
+          const selectionParts: string[] = [];
+          if (size) selectionParts.push(`Size: ${size}`);
+          human.forEach((d) => selectionParts.push(`${d.attribute_name}: ${d.option_label}`));
+          const selectionDesc = selectionParts.join(' • ');
+
+          // Fill UI lists
+          q[rowId] = item.quantity || 1;
+          p[rowId] = unitPriceNum;
           prod.push([
-            id,
+            rowId,
             item.product_name,
             item.product_image || '/images/default.jpg',
-            item.product_price,
-            item.alt_text || '',
+            unitPriceNum,
+            selectionDesc, // show clean selections under name
           ]);
+
+          // Stash metadata used later, including base & deltas for WhatsApp message
+          const basePriceNum = parseFloat(item?.price_breakdown?.base_price ?? '0') || 0;
+          const lineTotalNum = parseFloat(item?.price_breakdown?.line_total ?? '0') || 0;
+          const attrsDeltaNum = parseFloat(
+            item?.price_breakdown?.attributes_delta ??
+            item?.attributes_price_delta ??
+            '0'
+          ) || 0;
+
+          meta[rowId] = {
+            cart_item_id: cartItemId,
+            product_id: productId,
+            selected_size: size,
+            selected_attributes: item.selected_attributes || {},
+            selected_attributes_human: human,
+            variant_signature: signature,
+            attributes_price_delta: attrsDeltaNum,
+            base_price: basePriceNum,
+            line_total: lineTotalNum,
+          };
         }
 
         setQuantities(q);
         setCustomPrices(p);
         setCartData({ products: prod });
+        setCartMeta(meta);
       } catch (err) {
         console.error('❌ Cart fetch error:', err);
         setCartData({ products: [] });
@@ -95,43 +175,52 @@ export default function PaymentCheckoutPage() {
   }, []);
 
   const subtotal = cartData.products.reduce(
-    (acc, [id]) => acc + (quantities[id] || 1) * (customPrices[id] || 0),
+    (acc, [rowId]) => acc + (quantities[rowId] || 1) * (customPrices[rowId] || 0),
     0
   );
   const tax = 50;
   const shipping = 100;
   const total = subtotal + tax + shipping;
 
-  const updateQuantity = (id: string, delta: number) => {
+  const updateQuantity = (rowId: string, delta: number) => {
     setQuantities((prev) => ({
       ...prev,
-      [id]: Math.max(1, (prev[id] || 1) + delta),
+      [rowId]: Math.max(1, (prev[rowId] || 1) + delta),
     }));
   };
 
-  const removeItem = async (id: string) => {
+  const removeItem = async (rowId: string) => {
+    const meta = cartMeta[rowId];
+    const realProductId = meta?.product_id || rowId;
+
+    // Optimistic UI updates
     setQuantities((prev) => {
       const copy = { ...prev };
-      delete copy[id];
+      delete copy[rowId];
       return copy;
     });
 
     setCustomPrices((prev) => {
       const copy = { ...prev };
-      delete copy[id];
+      delete copy[rowId];
       return copy;
     });
 
     setCartData((prev) => ({
       ...prev,
-      products: prev.products.filter(([pid]) => pid !== id),
+      products: prev.products.filter(([rid]) => rid !== rowId),
     }));
 
     try {
+      // Use variant_signature for precise deletion of this variant line
       const res = await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: token, product_id: id }),
+        body: JSON.stringify({
+          user_id: token,                       // kept for compatibility
+          product_id: realProductId,
+          variant_signature: meta?.variant_signature || '',
+        }),
       });
 
       if (!res.ok) throw new Error();
@@ -155,29 +244,22 @@ export default function PaymentCheckoutPage() {
   };
 
   const handleOrderNow = async () => {
-    let msg =
-      Object.entries(userInfo)
-        .map(([key, val]) => `${key.charAt(0).toUpperCase() + key.slice(1)}: ${val || 'N/A'}`)
-        .join('\n') + '\n\nOrder:\n';
+    // Build WhatsApp message with exact math format:
+    // Product (Paper Type: Simple, Size: 49): 3 x $(4 + 0 + 5) = $27
+    let msgLines: string[] = [
+      `Name: ${userInfo.name || 'N/A'}`,
+      `Email: ${userInfo.email || 'N/A'}`,
+      `Phone: ${userInfo.phone || 'N/A'}`,
+      `Company: ${userInfo.company || 'N/A'}`,
+      `Address: ${userInfo.address || 'N/A'}`,
+      `City: ${userInfo.city || 'N/A'}`,
+      `Zip: ${userInfo.zip || 'N/A'}`,
+      `Instructions: ${userInfo.instructions || 'N/A'}`,
+      ``,
+      `Order:`,
+    ];
 
-    const itemsForBackend: any[] = [];
-    let hasError = false;
-
-    cartData.products.forEach(([id, name]) => {
-      const qty = quantities[id] || 1;
-      const price = customPrices[id] || 0;
-
-
-      msg += `${name} - ${qty} x $${price}\n`;
-
-      itemsForBackend.push({
-        product_id: id,
-        quantity: parseInt(qty.toString()),
-        unit_price: parseFloat(price.toFixed(2)),
-        total_price: parseFloat((price * qty).toFixed(2)),
-      });
-    });
-
+    // Basic validation for delivery
     if (!userInfo.email || !userInfo.address || !userInfo.city || !userInfo.phone) {
       Toastify({
         text: "Please fill in all required delivery fields",
@@ -187,7 +269,54 @@ export default function PaymentCheckoutPage() {
       return;
     }
 
-    if (hasError) return;
+    const itemsForBackend: any[] = [];
+
+    for (const [rowId, name] of cartData.products.map(([rid, n]) => [rid, n] as const)) {
+      const qty = quantities[rowId] || 1;
+      const unitPrice = customPrices[rowId] || 0;
+      const meta = cartMeta[rowId] || {};
+      const realProductId = meta.product_id || rowId;
+
+      // Human-readable pieces for message
+      const size = meta.selected_size?.trim() ? `Size: ${meta.selected_size.trim()}` : '';
+      const human = Array.isArray(meta.selected_attributes_human) ? meta.selected_attributes_human : [];
+
+      const selectionTokens: string[] = [];
+      if (size) selectionTokens.push(size);
+      human.forEach((d) => selectionTokens.push(`${d.attribute_name}: ${d.option_label}`));
+      const selectionParen = selectionTokens.length ? ` (${selectionTokens.join(', ')})` : '';
+
+      // Price math parts: base + ALL deltas (including zeros)
+      const base = typeof meta.base_price === 'number' ? meta.base_price : unitPrice; // fallback if not sent
+      const deltas = human.map((d) => d.price_delta || '0');
+      const mathParts = [base.toString(), ...deltas].join(' + ');
+      const lineTotal = (unitPrice * qty).toFixed(2);
+
+      msgLines.push(`${name}${selectionParen}: ${qty} x $(${mathParts}) = $${lineTotal}`);
+
+      // Backend payload item — now includes human list + base_price
+      itemsForBackend.push({
+        product_id: realProductId,
+        quantity: parseInt(qty.toString()),
+        unit_price: Number(unitPrice.toFixed(2)),
+        total_price: Number((unitPrice * qty).toFixed(2)),
+
+        selected_size: meta.selected_size || '',
+        selected_attributes: meta.selected_attributes || {},
+        selected_attributes_human: human,            // ✅ NEW
+        base_price: typeof meta.base_price === 'number' ? meta.base_price : undefined, // ✅ NEW
+        variant_signature: meta.variant_signature || '',
+        attributes_price_delta: meta.attributes_price_delta || 0,
+      });
+    }
+
+    msgLines.push(
+      ``,
+      `Subtotal: $${subtotal.toFixed(2)}`,
+      `Tax: $${tax}`,
+      `Shipping: $${shipping}`,
+      `Total: $${total.toFixed(2)}`
+    );
 
     const payload = {
       user_name: userInfo.name || 'Guest',
@@ -222,23 +351,31 @@ export default function PaymentCheckoutPage() {
       }).showToast();
 
       // Clear Cart on frontend & backend
-      for (const item of cartData.products) {
+      for (const [rowId] of cartData.products) {
+        const meta = cartMeta[rowId];
+        const realProductId = meta?.product_id || rowId;
         try {
           await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: token, product_id: item[0] }),
+            body: JSON.stringify({
+              user_id: token,
+              product_id: realProductId,
+              variant_signature: meta?.variant_signature || '',
+            }),
           });
         } catch (err) {
-          console.warn(`❌ Failed to delete item ${item[0]} after order:`, err);
+          console.warn(`❌ Failed to delete item ${rowId} after order:`, err);
         }
       }
 
       setCartData({ products: [] });
       setQuantities({});
       setCustomPrices({});
-      window.open(`https://wa.me/923423773564?text=${encodeURIComponent(msg)}`, '_blank');
 
+      // WhatsApp message with the detailed breakdown format
+      const msg = msgLines.join('\n');
+      window.open(`https://wa.me/923423773564?text=${encodeURIComponent(msg)}`, '_blank');
     } catch (err) {
       console.error('❌ Order save failed:', err);
       Toastify({
@@ -249,13 +386,13 @@ export default function PaymentCheckoutPage() {
     }
   };
 
-  const orderItems = cartData.products.map(([id, name, pic, , desc]) => ({
-    id,
+  const orderItems = cartData.products.map(([rowId, name, pic, unitPrice, desc]) => ({
+    id: rowId,
     name,
-    pic: pic || '/images/img1.jpg',
+    pic: pic || 'images/img1.jpg',
     desc: desc || '',
-    quantity: quantities[id] || 1,
-    price: customPrices[id] || 0,
+    quantity: quantities[rowId] || 1,
+    price: customPrices[rowId] || unitPrice || 0,
   }));
 
   if (loading) {
@@ -265,13 +402,13 @@ export default function PaymentCheckoutPage() {
       </div>
     );
   }
+
   return (
     <div className="min-h-screen bg-gray-50 text-black text-[3.5vw] sm:text-base">
-      {/* Header */}
       <Header />
       <LogoSection />
       <MobileTopBar />
-      {/* Main Checkout Section */}
+
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Delivery Section */}
         <div className="bg-white shadow rounded-lg p-8">
@@ -302,9 +439,9 @@ export default function PaymentCheckoutPage() {
             onClick={handleOrderNow}
             disabled={cartData.products.length === 0}
             className={`w-full mt-8 py-3 text-sm font-medium rounded-md transition-all
-        ${cartData.products.length === 0 
-          ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
-          : 'bg-[#891F1A] text-white hover:bg-[#6e1815]'}`}>
+              ${cartData.products.length === 0 
+                ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
+                : 'bg-[#891F1A] text-white hover:bg-[#6e1815]'}`}>
             Order Now
           </button>
         </div>
@@ -324,11 +461,14 @@ export default function PaymentCheckoutPage() {
                   height={56}
                   loading="lazy"
                   className="w-14 h-14 object-cover rounded flex-shrink-0"
-                  onError={(e) => (e.currentTarget.src = '/images/default.jpg')}
+                  onError={(e) => (e.currentTarget.src = '/images/img1.jpg')}
                 />
-                <div className="flex-1 ml-4 text-sm min-w-[120px]">
+                <div className="flex-1 ml-4 text-sm min-w-[160px]">
                   <p className="font-medium line-clamp-1">{item.name}</p>
-                  <p className="text-xs text-gray-500">{item.desc}</p>
+                  {/* show human selections under product name */}
+                  {item.desc ? (
+                    <p className="text-xs text-gray-600 mt-0.5">{item.desc}</p>
+                  ) : null}
                 </div>
                 <div className="flex items-center space-x-1 my-2 sm:my-0">
                   <button
@@ -344,7 +484,8 @@ export default function PaymentCheckoutPage() {
                   </button>
                 </div>
                 <div className="flex flex-col items-end ml-4 space-y-1">
-                  {/* <strong className="text-black-200 text-xl">${item.price}</strong> */}
+                  {/* You can show price if needed:
+                  <span className="text-sm font-medium">${(item.price * item.quantity).toFixed(2)}</span> */}
                   <button onClick={() => removeItem(item.id)}>
                     <Trash2 size={14} className="text-red-600" />
                   </button>

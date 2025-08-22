@@ -96,7 +96,7 @@ export default function SubCategoryPage() {
           return {
             id: prod.id,
             name: prod.name,
-            image: prod.images?.[0]?.url || "/images/fallback.png",
+            image: prod.images?.[0]?.url || "/images/img1.jpg",
             badge: stockMatch?.stock_status?.trim() || "Unknown",
             rating: 0,
           };
@@ -192,7 +192,7 @@ export default function SubCategoryPage() {
                   className="w-full h-56 object-cover rounded-t-2xl transition-transform duration-500 group-hover:scale-105"
                   onError={(e) => {
                     e.currentTarget.onerror = null;
-                    e.currentTarget.src = "/images/fallback.png";
+                    e.currentTarget.src = "/images/img1.jpg";
                   }}
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center px-4 opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-20 rounded-t-2xl">
