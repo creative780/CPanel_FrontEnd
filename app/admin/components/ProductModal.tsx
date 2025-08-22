@@ -4,6 +4,8 @@ import type React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "react-toastify";
 import { API_BASE_URL } from "../../utils/api";
+import { Chart, Filler } from "chart.js";
+Chart.register(Filler);
 
 type AttributeOption = {
   id: string;
@@ -41,6 +43,53 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
   headers.set("X-Frontend-Key", FRONTEND_KEY);
   return { ...init, headers };
+};
+
+const isJsonResponse = (res: Response) =>
+  (res.headers.get("content-type") || "")
+    .toLowerCase()
+    .includes("application/json");
+
+const safeJson = async (res: Response) => {
+  if (!isJsonResponse(res)) {
+    const text = await res.text(); // likely HTML error page
+    const err: any = new Error(`Non-JSON response (${res.status})`);
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
+  return res.json();
+};
+
+const apiPost = async (url: string, body?: any) => {
+  const res = await fetch(
+    url,
+    withFrontendKey({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+  );
+  if (!res.ok) {
+    // attempt JSON, then fall back to text
+    try {
+      const j = await safeJson(res);
+      const msg = j?.error || `HTTP ${res.status}`;
+      const err: any = new Error(msg);
+      err.status = res.status;
+      err.body = j;
+      throw err;
+    } catch (e: any) {
+      if (e?.message?.startsWith("Non-JSON response")) {
+        const err: any = new Error(`HTTP ${res.status}`);
+        err.status = res.status;
+        err.body = e.body;
+        throw err;
+      }
+      throw e;
+    }
+  }
+  return safeJson(res);
 };
 
 const addLowStockNotification = (
@@ -98,8 +147,11 @@ const fileToBase64 = (file: File) =>
   });
 
 const fetchUrlAsDataUrl = async (url: string): Promise<string> => {
-  const res = await fetch(url, { credentials: "omit" });
-  if (!res.ok) throw new Error("fetch_failed");
+  const res = await fetch(url, { credentials: "omit", mode: "cors" });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`fetch_failed (${res.status}) ${txt?.slice(0, 120)}`);
+  }
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -284,85 +336,39 @@ const Modal = ({
       setCustomAttributes([]);
       return;
     }
-
+    if (!FRONTEND_KEY) {
+      toast.warn(
+        "Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart."
+      );
+      return;
+    }
     // ---- EDIT MODE: fetch all product pieces (including attributes) ----
     const fetchDetails = async () => {
       try {
-        const [
-          basicRes,
-          seoRes,
-          variantRes,
-          shipRes,
-          otherRes,
-          comboRes,
-          attrRes,
-        ] = await Promise.all([
-          fetch(
-            `${API_BASE_URL}/api/show_specific_product/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          fetch(
-            `${API_BASE_URL}/api/show_product_seo/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          fetch(
-            `${API_BASE_URL}/api/show_product_variant/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          fetch(
-            `${API_BASE_URL}/api/show_product_shipping_info/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          fetch(
-            `${API_BASE_URL}/api/show_product_other_details/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          fetch(
-            `${API_BASE_URL}/api/show_product_variants/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-          // NEW: attributes
-          fetch(
-            `${API_BASE_URL}/api/show_product_attributes/`,
-            withFrontendKey({
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ product_id: productId }),
-            })
-          ),
-        ]);
-
-        const basic = await basicRes.json();
-        const seo = await seoRes.json();
-        const variant = await variantRes.json();
-        const shipping = await shipRes.json();
-        const other = await otherRes.json();
-        const combos = await comboRes.json();
-        const attrs = await attrRes.json();
+        const [basic, seo, variant, shipping, other, combos, attrs] =
+          await Promise.all([
+            apiPost(`${API_BASE_URL}/api/show_specific_product/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_seo/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_variant/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_shipping_info/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_other_details/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_variants/`, {
+              product_id: productId,
+            }),
+            apiPost(`${API_BASE_URL}/api/show_product_attributes/`, {
+              product_id: productId,
+            }),
+          ]);
 
         // Primary form data
         setFormData((prev: any) => ({
@@ -377,7 +383,7 @@ const Modal = ({
           videoUrl: basic.video_url || "",
           metaTitle: seo.meta_title || "",
           metaDescription: seo.meta_description || "",
-          metaKeywords: "", // we use tempMetaKeywords for the input
+          metaKeywords: "",
           ogTitle: seo.open_graph_title || "",
           ogDescription: seo.open_graph_desc || "",
           ogImage: seo.open_graph_image_url || "",
@@ -403,7 +409,6 @@ const Modal = ({
           shippingClass: (shipping.shipping_class || "").split(","),
         }));
 
-        // Prefill the "temp" string fields for view/edit
         setTempMetaKeywords(
           Array.isArray(seo.meta_keywords) ? seo.meta_keywords.join(", ") : ""
         );
@@ -415,7 +420,9 @@ const Modal = ({
             ? seo.grouped_filters.join(", ")
             : ""
         );
-        setTempSizes(Array.isArray(variant.sizes) ? variant.sizes.join(", ") : "");
+        setTempSizes(
+          Array.isArray(variant.sizes) ? variant.sizes.join(", ") : ""
+        );
         setTempColorVariants(
           Array.isArray(variant.color_variants)
             ? variant.color_variants.join(", ")
@@ -440,7 +447,6 @@ const Modal = ({
             : ""
         );
 
-        // Images (preserve & display)
         const existingArray = Array.isArray(other.images)
           ? other.images
           : other.images
@@ -463,10 +469,10 @@ const Modal = ({
             file: null,
           }))
         );
+
         if (other.subcategory_ids?.length > 0)
           setSelectedSubcategories(other.subcategory_ids);
 
-        // Attributes (this replaces the old dummy block)
         if (Array.isArray(attrs)) {
           const normalized: CustomAttribute[] = attrs.map((a: any) => ({
             id: String(a?.id || crypto.randomUUID()),
@@ -484,7 +490,9 @@ const Modal = ({
                   is_default: !!o?.is_default,
                   image_id: o?.image_id || null,
                   _image_file: null,
-                  _image_preview: o?.image_url ? urlForDisplay(o.image_url) : null,
+                  _image_preview: o?.image_url
+                    ? urlForDisplay(o.image_url)
+                    : null,
                   image: null,
                 }))
               : [],
@@ -493,9 +501,12 @@ const Modal = ({
         } else {
           setCustomAttributes([]);
         }
-      } catch (err) {
-        toast.error("❌ Failed to load product details");
+      } catch (err: any) {
         console.error("Fetch product detail error:", err);
+        const msg = err?.status
+          ? `Failed to load product details (HTTP ${err.status}).`
+          : "Failed to load product details.";
+        toast.error(msg);
       }
     };
 
@@ -1686,7 +1697,9 @@ const Modal = ({
 
                                     <div className="flex items-center gap-3 h-20">
                                       <label className="btn-primary cursor-pointer py-2 px-3 text-xs text-center">
-                                        {opt._image_preview ? "Change" : "Upload"}
+                                        {opt._image_preview
+                                          ? "Change"
+                                          : "Upload"}
                                         <input
                                           type="file"
                                           accept="image/*"
@@ -1928,7 +1941,7 @@ const Modal = ({
                 <button
                   onClick={nextPreview}
                   aria-label="Next image"
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-2xl px-3 py-2 bg-black/40 rounded-full"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-white text-2xl px-3 py-2 bg-black/40 rounded-full"
                 >
                   ›
                 </button>
