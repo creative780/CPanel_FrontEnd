@@ -732,15 +732,11 @@ const Modal = ({
   try {
     toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
 
-    // ✅ Only collect NEW images (files or data URLs). Do NOT fetch remote URLs in edit mode.
+    // Only NEW images: files or data URLs. Do NOT fetch remote URLs in edit mode.
     const newImagesBase64: string[] = [];
     for (const img of previewImages) {
-      if (img.kind === "file" && img.file) {
-        newImagesBase64.push(await fileToBase64(img.file));
-      } else if (typeof img.src === "string" && img.src.startsWith("data:image/")) {
-        newImagesBase64.push(img.src);
-      }
-      // if img.kind === "url", we leave it alone during edit; backend keeps existing gallery
+      if (img.kind === "file" && img.file) newImagesBase64.push(await fileToBase64(img.file));
+      else if (typeof img.src === "string" && img.src.startsWith("data:image/")) newImagesBase64.push(img.src);
     }
     const hasNewImages = newImagesBase64.length > 0;
 
@@ -752,33 +748,31 @@ const Modal = ({
 
     const parsedCombinations = String(tempVariantCombinations || "")
       .split("|")
-      .map((entry) => entry.trim())
+      .map((s) => s.trim())
       .filter(Boolean)
       .map((entry) => {
         const [description, price] = entry.split("::").map((v) => v.trim());
         return { description, price_override: parseFloat(price) || 0 };
       });
 
-    // Build attributes payload (unchanged)
+    // Build attributes payload (preserve image_id when unchanged; send base64 if replaced)
     const attrsForPayload: any[] = [];
     for (const a of customAttributes) {
       const opts: any[] = [];
       for (const o of a.options) {
         let imageBase64 = o.image || null;
         let imageId = o.image_id || null;
-
         if (o._image_file) {
           imageBase64 = await fileToBase64(o._image_file);
-          imageId = null; // replacing the image
+          imageId = null;
         }
-
         opts.push({
           id: o.id,
           label: o.label,
           price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
           is_default: !!o.is_default,
-          image_id: imageId,
-          image: imageBase64, // base64 if changed, else null
+          image_id: imageId,  // keep existing image when not replaced
+          image: imageBase64, // base64 only when changed
         });
       }
       if (opts.length > 0 && !opts.some((x) => x.is_default)) {
@@ -823,27 +817,21 @@ const Modal = ({
       addOnOptions: cleanCommaArray(tempAddOnOptions),
       customTags: cleanCommaArray(tempCustomTags),
       groupedFilters: cleanCommaArray(tempGroupedFilters),
-      customAttributes: attrsForPayload,
+      customAttributes: attrsForPayload,   // ✅ ensure this is sent on edit
     };
 
     let res: Response;
-
     if (isEditMode) {
-      // 🔒 EDIT: Only replace images if we actually have NEW base64s
       const payload: any = {
         product_ids: [formData.sku || productId],
         ...commonFields,
       };
-
       if (hasNewImages) {
         payload.force_replace_images = true;
         payload.images = newImagesBase64;
       } else {
-        // No image changes -> do NOT request a replace
-        payload.force_replace_images = false;
-        // and we omit "images" entirely
+        payload.force_replace_images = false; // leave existing gallery untouched
       }
-
       res = await fetch(
         `${API_BASE_URL}/api/edit-product/`,
         withFrontendKey({
@@ -853,41 +841,26 @@ const Modal = ({
         })
       );
     } else {
-      // 🆕 CREATE: send the gallery; create flow expects images
-      const createPayload = {
-        ...commonFields,
-        images: newImagesBase64,
-        force_replace_images: true,
-      };
+      const payload = { ...commonFields, images: newImagesBase64, force_replace_images: true };
       res = await fetch(
         `${API_BASE_URL}/api/save-product/`,
         withFrontendKey({
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(createPayload),
+          body: JSON.stringify(payload),
         })
       );
     }
 
     let result: any = {};
-    try {
-      result = await res.clone().json();
-    } catch {}
+    try { result = await res.clone().json(); } catch {}
 
     toast.dismiss(toastId);
     if (res.ok) {
       toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
-      if (commonFields.quantity <= commonFields.low_stock_alert && commonFields.quantity > 0) {
-        addLowStockNotification(
-          commonFields.name,
-          String(commonFields.subcategory_ids?.[0] ?? commonFields.name),
-          commonFields.quantity
-        );
-      }
       onClose?.();
     } else {
-      const fallbackMsg = `Failed to ${isEditMode ? "update" : "save"} product. Status ${res.status}`;
-      toast.error(result?.error || fallbackMsg);
+      toast.error(result?.error || `Failed to ${isEditMode ? "update" : "save"} product.`);
     }
   } catch (err: any) {
     toast.dismiss(toastId);
@@ -895,6 +868,7 @@ const Modal = ({
     console.error("Save product error:", err);
   }
 };
+
 
   return (
     <div
