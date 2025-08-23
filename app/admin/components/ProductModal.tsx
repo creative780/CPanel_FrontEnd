@@ -88,18 +88,6 @@ const fileToBase64 = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-const fetchUrlAsDataUrl = async (url: string): Promise<string> => {
-  const res = await fetch(url, { credentials: "omit" });
-  if (!res.ok) throw new Error(`fetch_failed: ${url} • HTTP ${res.status}`);
-  const blob = await res.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onloadend = () => resolve(String(r.result));
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
-};
-
 // --- Component -------------------------------------------------------------
 
 const Modal = ({
@@ -136,6 +124,7 @@ const Modal = ({
   const [formData, setFormData] = useState<any>({
     title: "",
     description: "",
+    // sku is managed internally (hidden); filled on load (edit) or generated once on save (create)
     sku: "",
     category: "",
     subcategory: "",
@@ -355,7 +344,7 @@ const Modal = ({
           ...prev,
           title: basic.name || "",
           description: basic.fit_description || "",
-          sku: basic.id || "",
+          sku: basic.id || "", // kept internally; field hidden from UI in edit mode
           category: "",
           subcategory: basic.subcategory?.id || "",
           brand: basic.brand_title || "",
@@ -404,7 +393,7 @@ const Modal = ({
             : ""
         );
 
-        // Images (preserve & display) — keep ALL existing, no directory trimming
+        // Images (preserve & display)
         const existingArray = Array.isArray(other.images) ? other.images : other.images ? [other.images] : [];
         const displayUrls = existingArray.map((p: string) => urlForDisplay(p));
         setPreviewImages(
@@ -426,7 +415,8 @@ const Modal = ({
               ? a.options.map((o: any) => ({
                   id: String(o?.id || crypto.randomUUID()),
                   label: String(o?.label || ""),
-                  price_delta: typeof o?.price_delta === "number" ? o.price_delta : o?.price_delta ? parseFloat(o.price_delta) : 0,
+                  price_delta:
+                    typeof o?.price_delta === "number" ? o.price_delta : o?.price_delta ? parseFloat(o.price_delta) : 0,
                   is_default: !!o?.is_default,
                   image_id: o?.image_id || null,
                   _image_file: null,
@@ -503,31 +493,6 @@ const Modal = ({
       setFormData((prev: any) => ({ ...prev, stockStatus: status }));
     }
   }, [formData.stockQuantity, formData.lowStockAlert]);
-
-  // Auto SKU on add
-  useEffect(() => {
-    const generateSku = async () => {
-      if (!formData.title.trim() || !formData.subcategory || isEditMode) return;
-      try {
-        const res = await fetch(
-          `${API_BASE_URL}/api/generate-product-id/`,
-          withFrontendKey({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              name: formData.title,
-              subcategory_id: formData.subcategory,
-            }),
-          })
-        );
-        const data = await parseJsonSafe(res, "generate-product-id");
-        if (data?.product_id) setFormData((prev: any) => ({ ...prev, sku: data.product_id }));
-      } catch (err) {
-        console.error("Failed to generate product ID:", err);
-      }
-    };
-    generateSku();
-  }, [formData.title, formData.subcategory, isEditMode]);
 
   useEffect(() => setIsMounted(true), []);
 
@@ -713,162 +678,190 @@ const Modal = ({
   };
   // =================================
 
- const handleSubmit = async (e: any) => {
-  e.preventDefault();
-  const formErrors = validate();
-  setErrors(formErrors);
-  if (Object.keys(formErrors).length > 0) {
-    toast.error("Please correct the highlighted fields.");
-    return;
-  }
-
-  const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
-  if (finalSubcategoryIds.length === 0) {
-    toast.error("Please select at least one subcategory.");
-    return;
-  }
-
-  let toastId: any;
-  try {
-    toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
-
-    // Only NEW images: files or data URLs. Do NOT fetch remote URLs in edit mode.
-    const newImagesBase64: string[] = [];
-    for (const img of previewImages) {
-      if (img.kind === "file" && img.file) newImagesBase64.push(await fileToBase64(img.file));
-      else if (typeof img.src === "string" && img.src.startsWith("data:image/")) newImagesBase64.push(img.src);
+  const handleSubmit = async (e: any) => {
+    e.preventDefault();
+    const formErrors = validate();
+    setErrors(formErrors);
+    if (Object.keys(formErrors).length > 0) {
+      toast.error("Please correct the highlighted fields.");
+      return;
     }
-    const hasNewImages = newImagesBase64.length > 0;
 
-    const cleanCommaArray = (val: string) =>
-      String(val || "")
-        .split(",")
-        .map((v) => v.trim())
-        .filter(Boolean);
+    const finalSubcategoryIds = [...new Set([...selectedSubcategories, formData.subcategory].filter(Boolean))];
+    if (finalSubcategoryIds.length === 0) {
+      toast.error("Please select at least one subcategory.");
+      return;
+    }
 
-    const parsedCombinations = String(tempVariantCombinations || "")
-      .split("|")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((entry) => {
-        const [description, price] = entry.split("::").map((v) => v.trim());
-        return { description, price_override: parseFloat(price) || 0 };
-      });
+    let toastId: any;
+    try {
+      toastId = toast.loading(isEditMode ? "Updating product..." : "Saving product...");
 
-    // Build attributes payload (preserve image_id when unchanged; send base64 if replaced)
-    const attrsForPayload: any[] = [];
-    for (const a of customAttributes) {
-      const opts: any[] = [];
-      for (const o of a.options) {
-        let imageBase64 = o.image || null;
-        let imageId = o.image_id || null;
-        if (o._image_file) {
-          imageBase64 = await fileToBase64(o._image_file);
-          imageId = null;
+      // CREATE FLOW ONLY: generate product ID ONCE at save time (no live calls while typing)
+      let generatedSku: string | null = formData.sku || null;
+      if (!isEditMode) {
+        try {
+          const genRes = await fetch(
+            `${API_BASE_URL}/api/generate-product-id/`,
+            withFrontendKey({
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: formData.title,
+                subcategory_id: finalSubcategoryIds[0],
+              }),
+            })
+          );
+          const genData = await parseJsonSafe(genRes, "generate-product-id");
+          generatedSku = genData?.product_id || null;
+        } catch (genErr) {
+          // Not fatal; backend can still generate. We just don't spam the endpoint anymore.
+          console.warn("Generate Product ID (on save) failed, proceeding:", genErr);
         }
-        opts.push({
-          id: o.id,
-          label: o.label,
-          price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
-          is_default: !!o.is_default,
-          image_id: imageId,  // keep existing image when not replaced
-          image: imageBase64, // base64 only when changed
+      }
+
+      // Only NEW images: files or data URLs. Do NOT fetch remote URLs in edit mode.
+      const newImagesBase64: string[] = [];
+      for (const img of previewImages) {
+        if (img.kind === "file" && img.file) newImagesBase64.push(await fileToBase64(img.file));
+        else if (typeof img.src === "string" && img.src.startsWith("data:image/")) newImagesBase64.push(img.src);
+      }
+      const hasNewImages = newImagesBase64.length > 0;
+
+      const cleanCommaArray = (val: string) =>
+        String(val || "")
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean);
+
+      const parsedCombinations = String(tempVariantCombinations || "")
+        .split("|")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const [description, price] = entry.split("::").map((v) => v.trim());
+          return { description, price_override: parseFloat(price) || 0 };
         });
-      }
-      if (opts.length > 0 && !opts.some((x) => x.is_default)) {
-        opts[0].is_default = true;
-        opts[0].price_delta = 0;
-      }
-      attrsForPayload.push({ id: a.id, name: a.name, options: opts });
-    }
 
-    const commonFields: any = {
-      name: formData.title,
-      description: formData.description,
-      brand_title: formData.brand,
-      price: parseFloat(formData.normalPrice) || 0,
-      discounted_price: parseFloat(formData.discountedPrice) || 0,
-      tax_rate: parseFloat(formData.taxRate) || 0,
-      price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
-      video_url: formData.videoUrl,
-      fabric_finish: formData.fabricFinish,
-      status: "active",
-      quantity: parseInt(formData.stockQuantity) || 0,
-      low_stock_alert: parseInt(formData.lowStockAlert) || 0,
-      stock_status: formData.stockStatus || "In Stock",
-      category_ids: selectedCategories,
-      subcategory_ids: finalSubcategoryIds,
-      shippingClass: cleanCommaArray(tempShippingClass),
-      processing_time: formData.processingTime,
-      image_alt_text: formData.imageAlt,
-      meta_title: formData.metaTitle,
-      meta_description: formData.metaDescription,
-      meta_keywords: cleanCommaArray(tempMetaKeywords),
-      open_graph_title: formData.ogTitle,
-      open_graph_desc: formData.ogDescription,
-      open_graph_image_url: formData.ogImage,
-      canonical_url: formData.canonicalUrl,
-      json_ld: formData.jsonLdSchema,
-      printing_method: formData.printingMethod,
-      variant_combinations: parsedCombinations,
-      size: cleanCommaArray(tempSizes),
-      colorVariants: cleanCommaArray(tempColorVariants),
-      materialType: cleanCommaArray(tempMaterialType),
-      addOnOptions: cleanCommaArray(tempAddOnOptions),
-      customTags: cleanCommaArray(tempCustomTags),
-      groupedFilters: cleanCommaArray(tempGroupedFilters),
-      customAttributes: attrsForPayload,   // ✅ ensure this is sent on edit
-    };
+      // Build attributes payload (preserve image_id when unchanged; send base64 if replaced)
+      const attrsForPayload: any[] = [];
+      for (const a of customAttributes) {
+        const opts: any[] = [];
+        for (const o of a.options) {
+          let imageBase64 = o.image || null;
+          let imageId = o.image_id || null;
+          if (o._image_file) {
+            imageBase64 = await fileToBase64(o._image_file);
+            imageId = null;
+          }
+          opts.push({
+            id: o.id,
+            label: o.label,
+            price_delta: Number.isFinite(o.price_delta) ? o.price_delta : 0,
+            is_default: !!o.is_default,
+            image_id: imageId, // keep existing image when not replaced
+            image: imageBase64, // base64 only when changed
+          });
+        }
+        if (opts.length > 0 && !opts.some((x) => x.is_default)) {
+          opts[0].is_default = true;
+          opts[0].price_delta = 0;
+        }
+        attrsForPayload.push({ id: a.id, name: a.name, options: opts });
+      }
 
-    let res: Response;
-    if (isEditMode) {
-      const payload: any = {
-        product_ids: [formData.sku || productId],
-        ...commonFields,
+      const commonFields: any = {
+        name: formData.title,
+        description: formData.description,
+        brand_title: formData.brand,
+        price: parseFloat(formData.normalPrice) || 0,
+        discounted_price: parseFloat(formData.discountedPrice) || 0,
+        tax_rate: parseFloat(formData.taxRate) || 0,
+        price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
+        video_url: formData.videoUrl,
+        fabric_finish: formData.fabricFinish,
+        status: "active",
+        quantity: parseInt(formData.stockQuantity) || 0,
+        low_stock_alert: parseInt(formData.lowStockAlert) || 0,
+        stock_status: formData.stockStatus || "In Stock",
+        category_ids: selectedCategories,
+        subcategory_ids: finalSubcategoryIds,
+        shippingClass: cleanCommaArray(tempShippingClass),
+        processing_time: formData.processingTime,
+        image_alt_text: formData.imageAlt,
+        meta_title: formData.metaTitle,
+        meta_description: formData.metaDescription,
+        meta_keywords: cleanCommaArray(tempMetaKeywords),
+        open_graph_title: formData.ogTitle,
+        open_graph_desc: formData.ogDescription,
+        open_graph_image_url: formData.ogImage,
+        canonical_url: formData.canonicalUrl,
+        json_ld: formData.jsonLdSchema,
+        printing_method: formData.printingMethod,
+        variant_combinations: parsedCombinations,
+        size: cleanCommaArray(tempSizes),
+        colorVariants: cleanCommaArray(tempColorVariants),
+        materialType: cleanCommaArray(tempMaterialType),
+        addOnOptions: cleanCommaArray(tempAddOnOptions),
+        customTags: cleanCommaArray(tempCustomTags),
+        groupedFilters: cleanCommaArray(tempGroupedFilters),
+        customAttributes: attrsForPayload,
       };
-      if (hasNewImages) {
-        payload.force_replace_images = true;
-        payload.images = newImagesBase64;
+
+      let res: Response;
+
+      if (isEditMode) {
+        const payload: any = {
+          product_ids: [formData.sku || productId], // sku is filled from backend on load; UI hidden
+          ...commonFields,
+        };
+        if (hasNewImages) {
+          payload.force_replace_images = true;
+          payload.images = newImagesBase64;
+        } else {
+          payload.force_replace_images = false; // leave existing gallery untouched
+        }
+        res = await fetch(
+          `${API_BASE_URL}/api/edit-product/`,
+          withFrontendKey({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        );
       } else {
-        payload.force_replace_images = false; // leave existing gallery untouched
+        // Include generated SKU for auditing (backend create doesn’t require it, but harmless to pass)
+        const payload: any = { ...commonFields, images: newImagesBase64, force_replace_images: true };
+        if (generatedSku) payload.client_generated_product_id = generatedSku;
+
+        res = await fetch(
+          `${API_BASE_URL}/api/save-product/`,
+          withFrontendKey({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          })
+        );
       }
-      res = await fetch(
-        `${API_BASE_URL}/api/edit-product/`,
-        withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-      );
-    } else {
-      const payload = { ...commonFields, images: newImagesBase64, force_replace_images: true };
-      res = await fetch(
-        `${API_BASE_URL}/api/save-product/`,
-        withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        })
-      );
+
+      let result: any = {};
+      try {
+        result = await res.clone().json();
+      } catch {}
+
+      toast.dismiss(toastId);
+      if (res.ok) {
+        toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
+        onClose?.();
+      } else {
+        toast.error(result?.error || `Failed to ${isEditMode ? "update" : "save"} product.`);
+      }
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error("Something went wrong while saving.");
+      console.error("Save product error:", err);
     }
-
-    let result: any = {};
-    try { result = await res.clone().json(); } catch {}
-
-    toast.dismiss(toastId);
-    if (res.ok) {
-      toast.success(isEditMode ? "Product updated successfully!" : "Product saved successfully!");
-      onClose?.();
-    } else {
-      toast.error(result?.error || `Failed to ${isEditMode ? "update" : "save"} product.`);
-    }
-  } catch (err: any) {
-    toast.dismiss(toastId);
-    toast.error("Something went wrong while saving.");
-    console.error("Save product error:", err);
-  }
-};
-
+  };
 
   return (
     <div
@@ -972,15 +965,7 @@ const Modal = ({
                 />
                 {errors.description && <p className="text-red-600 sm:col-span-2">{errors.description}</p>}
 
-                <input
-                  name="sku"
-                  type="text"
-                  placeholder="SKU / Product ID"
-                  className="input-primary"
-                  value={formData.sku}
-                  onChange={handleChange}
-                  disabled={isEditMode}
-                />
+                {/* SKU field is intentionally hidden now. We keep it internally for edit payloads. */}
 
                 {!isEditMode ? (
                   <>

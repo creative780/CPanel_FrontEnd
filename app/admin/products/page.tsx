@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import AdminAuthGuard from '../components/AdminAuthGaurd';
 import AdminSidebar from '../components/AdminSideBar';
 import { ToastContainer, toast } from 'react-toastify';
@@ -9,48 +9,53 @@ import Modal from '../components/ProductModal';
 import { Checkbox } from '@mui/material';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { API_BASE_URL } from '../../utils/api';
-import React from 'react';
 
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
+
+/** Attach the frontend key only when present. Never send an empty header. */
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
-  headers.set('X-Frontend-Key', FRONTEND_KEY);
+  if (FRONTEND_KEY) headers.set('X-Frontend-Key', FRONTEND_KEY);
   return { ...init, headers };
+};
+
+/** Safer JSON parse + error bubbling for non-2xx results. */
+const parseJsonStrict = async (res: Response, label: string) => {
+  const bodyText = await res.clone().text().catch(() => '');
+  let json: any = {};
+  try {
+    json = bodyText ? JSON.parse(bodyText) : {};
+  } catch {
+    // fine; we'll fall back to text body in message
+  }
+  if (!res.ok) {
+    const msg = json?.error || bodyText || `${label}: HTTP ${res.status}`;
+    throw new Error(msg.length > 400 ? msg.slice(0, 400) + '…' : msg);
+  }
+  return json;
 };
 
 function addLowStockNotification(productName: string, productId: string, quantity: number) {
   if (typeof window === 'undefined') return;
-  const existing = JSON.parse(localStorage.getItem('notifications') || '[]');
-  const alreadyExists = existing.some((n: any) => n.type === 'low_stock' && n.product_id === productId);
-  if (alreadyExists) return;
+  try {
+    const existing = JSON.parse(localStorage.getItem('notifications') || '[]');
+    const alreadyExists = existing.some((n: any) => n.type === 'low_stock' && n.product_id === productId);
+    if (alreadyExists) return;
 
-  const newNotification = {
-    id: crypto.randomUUID(),
-    type: 'low_stock',
-    order_id: productId,
-    user: 'System',
-    status: 'Low Stock',
-    message: `⚠️ Product "${productName}" (ID: ${productId}) is low on stock (${quantity} left)`,
-    created_at: new Date().toISOString(),
-    product_id: productId,
-  };
+    const newNotification = {
+      id: crypto.randomUUID(),
+      type: 'low_stock',
+      order_id: productId,
+      user: 'System',
+      status: 'Low Stock',
+      message: `⚠️ Product "${productName}" (ID: ${productId}) is low on stock (${quantity} left)`,
+      created_at: new Date().toISOString(),
+      product_id: productId,
+    };
 
-  localStorage.setItem('notifications', JSON.stringify([newNotification, ...existing]));
+    localStorage.setItem('notifications', JSON.stringify([newNotification, ...existing]));
+  } catch {}
 }
-
-const emptyImage = { type: 'file', value: '', file: null };
-
-const createEmptyProduct = () => ({
-  id: '',
-  name: '',
-  brandTitle: '',
-  price: '',
-  quantity: '',
-  fit: '',
-  sizeTypes: [''],
-  images: [structuredClone(emptyImage)],
-  printingMethod: [],
-});
 
 const printingMethodShortForms: Record<string, string> = {
   'Screen Printing': 'SP',
@@ -63,6 +68,31 @@ const printingMethodShortForms: Record<string, string> = {
   'Embossing': 'EM',
 };
 
+type ServerProduct = {
+  id: string;
+  name: string;
+  image?: string;
+  subcategory?: { id: string; name: string };
+  stock_status?: string;
+  stock_quantity?: number | string;
+  price: string | number;
+  printing_methods?: string[];
+  brand_title?: string;
+  fit_description?: string;
+  sizes?: string[];
+};
+
+const mapServerProduct = (p: ServerProduct) => ({
+  ...p,
+  brand_title: p.brand_title ?? '',
+  fit_description: p.fit_description ?? '',
+  sizes: Array.isArray(p.sizes) ? p.sizes : [],
+  images: [{ type: 'url', value: p.image || '', file: null }],
+  printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
+  quantity: Number(p.stock_quantity ?? 0) || 0,
+  stock_status: (p.stock_status || '').toString(),
+});
+
 export default function AdminProductManager() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [rawData, setRawData] = useState<any[]>([]);
@@ -72,32 +102,40 @@ export default function AdminProductManager() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSubCategory, setSelectedSubCategory] = useState('__all__');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [newProduct, setNewProduct] = useState(createEmptyProduct());
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | ''>('');
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [isMounted, setIsMounted] = useState(false);
 
+  /** UI guards for bulk actions to avoid double submits */
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isBulkOOS, setIsBulkOOS] = useState(false);
+
+  const initialFetchAbortRef = useRef<AbortController | null>(null);
+
+  // ---------- Initial load with abort ----------
   useEffect(() => {
+    if (!FRONTEND_KEY) {
+      toast.warn('Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart.', { autoClose: 6000 });
+      // Still load; some environments may not require the header.
+    }
+
+    const controller = new AbortController();
+    initialFetchAbortRef.current = controller;
+
     const run = async () => {
       try {
         const [catRes, subRes, prodRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey()),
-          fetch(`${API_BASE_URL}/api/show-subcategories/`, withFrontendKey()),
-          fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey()),
+          fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey({ signal: controller.signal })),
+          fetch(`${API_BASE_URL}/api/show-subcategories/`, withFrontendKey({ signal: controller.signal })),
+          fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey({ signal: controller.signal })),
         ]);
 
-        if (!catRes.ok || !subRes.ok || !prodRes.ok) {
-          const texts = await Promise.all([catRes.text(), subRes.text(), prodRes.text()]);
-          throw new Error(`Fetch failed: ${texts.map((t) => t.slice(0, 120)).join(' | ')}`);
-        }
-
         const [categoryData, subcategoryData, productData] = await Promise.all([
-          catRes.json(),
-          subRes.json(),
-          prodRes.json(),
+          parseJsonStrict(catRes, 'show-categories'),
+          parseJsonStrict(subRes, 'show-subcategories'),
+          parseJsonStrict(prodRes, 'show-product'),
         ]);
 
         const arrCats = Array.isArray(categoryData) ? categoryData : [];
@@ -107,50 +145,52 @@ export default function AdminProductManager() {
         const visibleCategories = arrCats.filter((c: any) => c.status === 'visible');
         const visibleSubcategories = arrSubs.filter((sc: any) => sc.status === 'visible');
 
+        // Build category map once (O(n))
         const categoryMap = new Map<string, any>();
-        visibleCategories.forEach((c: any) => {
-          categoryMap.set(c.name, { ...c, subcategories: [] as any[] });
-        });
+        for (const c of visibleCategories) categoryMap.set(c.name, { ...c, subcategories: [] as any[] });
 
-        visibleSubcategories.forEach((sub: any) => {
-          sub.products = arrProds.filter((p: any) => p?.subcategory?.id === sub.id);
-          sub.categories.forEach((catName: string) => {
-            if (categoryMap.has(catName)) categoryMap.get(catName).subcategories.push(sub);
-          });
-        });
+        // Pre-index products by subcategory id for O(n)
+        const prodsBySubId = new Map<string, any[]>();
+        for (const p of arrProds) {
+          const sid = p?.subcategory?.id;
+          if (!sid) continue;
+          if (!prodsBySubId.has(sid)) prodsBySubId.set(sid, []);
+          prodsBySubId.get(sid)!.push(mapServerProduct(p));
+        }
+
+        for (const sub of visibleSubcategories) {
+          sub.products = prodsBySubId.get(sub.id) || [];
+          for (const catName of sub.categories || []) {
+            const c = categoryMap.get(catName);
+            if (c) c.subcategories.push(sub);
+          }
+        }
 
         const finalData = Array.from(categoryMap.values());
         const allSubcats = finalData.flatMap((c) => c.subcategories);
+        const allProds = allSubcats.flatMap((sc: any) => sc.products);
 
-        const allProds = allSubcats.flatMap((sc: any) =>
-          sc.products.map((p: any) => ({
-            ...p,
-            brand_title: p.brand_title ?? '',
-            fit_description: p.fit_description ?? '',
-            sizes: Array.isArray(p.sizes) ? p.sizes : [],
-            images: [{ type: 'url', value: p.image || '', file: null }],
-            printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-            quantity: parseInt(p.stock_quantity, 10) || 0,
-            stock_status: (p.stock_status || '').toString(),
-          }))
-        );
+        // Only notify low-stock once per fresh fetch
+        for (const p of allProds) {
+          const qty = Number(p.quantity ?? 0);
+          if (qty > 0 && qty <= 5) addLowStockNotification(p.name, p.id, qty);
+        }
 
         setRawData(finalData);
         setCategories(finalData.map((c) => c.name));
         setSubcategories(allSubcats);
         setProducts(allProds);
       } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         toast.error(`❌ Failed to load data: ${err.message || err}`);
       }
     };
 
-    if (!FRONTEND_KEY) {
-      toast.warn('Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart.', { autoClose: 6000 });
-      return;
-    }
     run();
+    return () => controller.abort();
   }, []);
 
+  // ---------- Category/Subcategory cascades ----------
   useEffect(() => {
     if (!selectedCategory) {
       const allSubs = rawData.flatMap((c) => c.subcategories);
@@ -162,317 +202,93 @@ export default function AdminProductManager() {
   }, [selectedCategory, rawData]);
 
   useEffect(() => {
-    const notifyLow = (p: any) => {
-      const qty = Number(p.quantity ?? p.stock_quantity ?? 0);
-      if (qty > 0 && qty <= 5) addLowStockNotification(p.name, p.id, qty);
-      return { ...p, quantity: qty };
-    };
-
     if (!selectedCategory && selectedSubCategory === '__all__') {
-      const allProds = rawData.flatMap((c) => c.subcategories.flatMap((sc: any) => sc.products.map(notifyLow)));
+      const allProds = rawData.flatMap((c) => c.subcategories.flatMap((sc: any) => sc.products));
       setProducts(allProds);
     } else if (selectedCategory && selectedSubCategory === '__all__') {
       const cat = rawData.find((c) => c.name === selectedCategory);
-      const catProds =
-        cat?.subcategories.flatMap((sc: any) => sc.products.map(notifyLow)) || [];
+      const catProds = cat?.subcategories.flatMap((sc: any) => sc.products) || [];
       setProducts(catProds);
     } else if (selectedSubCategory && selectedSubCategory !== '__all__') {
       const allSubs = rawData.flatMap((c) => c.subcategories);
       const sub = allSubs.find((sc: any) => sc.name === selectedSubCategory);
-      const subProds = sub?.products.map(notifyLow) || [];
-      setProducts(subProds);
+      setProducts(sub?.products || []);
     }
   }, [selectedCategory, selectedSubCategory, rawData]);
 
   useEffect(() => setIsMounted(true), []);
 
-  const validateData = () => {
-    const newErrors: Record<string, string> = {};
-    if (!newProduct.name) newErrors['name'] = 'Product Name is required';
-    const hasValidImage = newProduct.images.some((img) => img.value || img.file);
-    if (!hasValidImage) newErrors['images'] = 'At least one image required';
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const uploadImage = async (img: any) => {
-    if (img.type === 'file' && img.file) {
-      const formData = new FormData();
-      formData.append('image', img.file);
-      const res = await fetch(`${API_BASE_URL}/api/save-image/`, withFrontendKey({
-        method: 'POST',
-        body: formData,
-      }));
-      const data = await res.json().catch(() => ({}));
-      return res.ok ? data?.url || '' : '';
-    }
-    return img.value || '';
-  };
-
-  const handleSave = async () => {
-    if (!validateData()) {
-      toast.error('❌ Please fix validation errors');
-      return;
-    }
-
+  // ---------- Refetch products (single source of truth) ----------
+  const refreshProducts = useCallback(async () => {
     try {
-      const imageUrls = await Promise.all(newProduct.images.map(uploadImage));
-
-      const payload = {
-        name: newProduct.name,
-        brand_title: newProduct.brandTitle || '',
-        price: parseFloat(newProduct.price) || 0,
-        quantity: parseInt(newProduct.quantity) || 0,
-        fit_description: newProduct.fit || '',
-        tax_rate: 0,
-        price_calculator: '',
-        video_url: '',
-        status: 'active',
-        low_stock_alert: 5,
-        shipping_class: 'Standard',
-        processing_time: '',
-        image_alt_text: 'Product Image',
-        meta_title: '',
-        meta_description: '',
-        meta_keywords: [],
-        open_graph_title: '',
-        open_graph_desc: '',
-        open_graph_image_url: '',
-        canonical_url: '',
-        json_ld: '',
-        sizes: newProduct.sizeTypes.filter((s: string) => s.trim()),
-        printingMethod: newProduct.printingMethod || [],
-        subcategory_ids: [subcategories.find((sc: any) => sc.name === selectedSubCategory)?.id || ''],
-        images: imageUrls,
-      };
-
-      let res: Response, responseData: any;
-
-      if (editingProductId) {
-        res = await fetch(`${API_BASE_URL}/api/edit-product/${editingProductId}/`, withFrontendKey({
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }));
-        responseData = await res.json().catch(() => ({}));
-      } else {
-        res = await fetch(`${API_BASE_URL}/api/save-product/`, withFrontendKey({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }));
-        responseData = await res.json().catch(() => ({}));
-      }
-
-      if (!res.ok) {
-        toast.error(`❌ Save failed: ${responseData?.error || 'Unknown error'}`);
-        return;
-      }
-
-      toast.success(editingProductId ? '✅ Product updated' : '✅ Product saved');
-      setNewProduct(createEmptyProduct());
-      setEditingProductId(null);
-      setIsModalOpen(false);
-
-      const refreshed = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey());
-      const parsed = await refreshed.json().catch(() => []);
-      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map((p: any) => ({
-        ...p,
-        brand_title: p.brand_title ?? '',
-        fit_description: p.fit_description ?? '',
-        sizes: Array.isArray(p.sizes) ? p.sizes : [],
-        images: [{ type: 'url', value: p.image || '', file: null }],
-        printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-        quantity: parseInt(p.stock_quantity, 10) || 0,
-      }));
+      const controller = new AbortController();
+      const res = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey({ signal: controller.signal }));
+      const parsed = await parseJsonStrict(res, 'show-product');
+      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map(mapServerProduct);
       setProducts(refreshedProds);
     } catch (err: any) {
-      toast.error(`❌ Save failed: ${err.message}`);
+      toast.error(`❌ Refresh failed: ${err.message || err}`);
     }
-  };
+  }, []);
 
-  const handleAddProduct = () => {
-    setEditingProductId(null);
-    setIsModalOpen(true);
-  };
+  // ---------- Mark Out Of Stock (bulk) ----------
+  const handleBulkMarkOutOfStock = useCallback(async () => {
+    if (selectedProductIds.length === 0 || isBulkOOS) return;
+    setIsBulkOOS(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/edit-product/`,
+        withFrontendKey({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ product_ids: selectedProductIds, quantity: 0 }),
+        })
+      );
+      await parseJsonStrict(res, 'edit-product');
+      toast.success('📦 Selected products marked Out Of Stock');
+      setSelectedProductIds([]);
+      await refreshProducts();
+    } catch (err: any) {
+      toast.error(`❌ Failed: ${err.message || err}`);
+    } finally {
+      setIsBulkOOS(false);
+    }
+  }, [selectedProductIds, isBulkOOS, refreshProducts]);
 
-  const handleEditProduct = (product: any) => {
-    setEditingProductId(product.id);
-    setIsModalOpen(true);
-  };
-
-  const handleDeleteMultiple = async () => {
-    if (selectedProductIds.length === 0) return;
-
+  // ---------- Delete ----------
+  const handleDeleteMultiple = useCallback(async () => {
+    if (selectedProductIds.length === 0 || isDeleting) return;
     const confirmDelete = confirm('Are you sure you want to delete selected products?');
     if (!confirmDelete) return;
 
+    setIsDeleting(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/delete-product/`, withFrontendKey({
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedProductIds, confirm: true }),
-      }));
-
-      const result = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        toast.error(`❌ Bulk delete failed: ${result?.error || 'Unknown error'}`);
-        return;
-      }
-
+      const res = await fetch(
+        `${API_BASE_URL}/api/delete-product/`,
+        withFrontendKey({
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids: selectedProductIds, confirm: true }),
+        })
+      );
+      await parseJsonStrict(res, 'delete-product');
       toast.success('🗑️ Selected products deleted');
       setSelectedProductIds([]);
-
-      const refreshed = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey());
-      const parsed = await refreshed.json().catch(() => []);
-      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map((p: any) => ({
-        ...p,
-        brand_title: p.brand_title ?? '',
-        fit_description: p.fit_description ?? '',
-        sizes: Array.isArray(p.sizes) ? p.sizes : [],
-        images: [{ type: 'url', value: p.image || '', file: null }],
-        printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-        quantity: parseInt(p.stock_quantity, 10) || 0,
-      }));
-      setProducts(refreshedProds);
+      await refreshProducts();
     } catch (err: any) {
-      toast.error(`❌ Delete failed: ${err.message}`);
+      toast.error(`❌ Delete failed: ${err.message || err}`);
+    } finally {
+      setIsDeleting(false);
     }
-  };
+  }, [selectedProductIds, isDeleting, refreshProducts]);
 
-  const handleMarkOutOfStock = async (product: any) => {
-    try {
-      const payload = {
-        name: product.name,
-        brand_title: product.brand_title || '',
-        price: parseFloat(product.price) || 0,
-        quantity: 0,
-        fit_description: product.fit_description || '',
-        tax_rate: 0,
-        price_calculator: '',
-        video_url: '',
-        status: product.status || 'active',
-        low_stock_alert: 5,
-        shipping_class: 'Standard',
-        processing_time: '',
-        image_alt_text: 'Product Image',
-        meta_title: '',
-        meta_description: '',
-        meta_keywords: [],
-        open_graph_title: '',
-        open_graph_desc: '',
-        open_graph_image_url: '',
-        canonical_url: '',
-        json_ld: '',
-        sizes: Array.isArray(product.sizes) ? product.sizes : [],
-        printingMethod: Array.isArray(product.printingMethod) ? product.printingMethod : [],
-        subcategory_ids: [subcategories.find((sc: any) => product.id?.startsWith?.(sc.id))?.id || ''],
-        images: (product.images || []).map((img: any) => (typeof img === 'string' ? img : img.value)),
-      };
+  // ---------- Selection helpers ----------
+  const toggleSelectProduct = useCallback((id: string) => {
+    setSelectedProductIds((prev) => (prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]));
+  }, []);
 
-      const res = await fetch(`${API_BASE_URL}/api/edit-product/`, withFrontendKey({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }));
-
-      if (!res.ok) {
-        toast.error('❌ Failed to mark out of stock');
-        return;
-      }
-
-      toast.success('📦 Product marked out of stock');
-
-      const refreshed = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey());
-      const parsed = await refreshed.json().catch(() => []);
-      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map((p: any) => ({
-        ...p,
-        brand_title: p.brand_title ?? '',
-        fit_description: p.fit_description ?? '',
-        sizes: Array.isArray(p.sizes) ? p.sizes : [],
-        images: [{ type: 'url', value: p.image || '', file: null }],
-        printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-        quantity: parseInt(p.stock_quantity, 10) || 0,
-      }));
-      setProducts(refreshedProds);
-    } catch (err: any) {
-      toast.error(`❌ Failed: ${err.message}`);
-    }
-  };
-
-  const handleBulkMarkOutOfStock = async () => {
-    if (selectedProductIds.length === 0) return;
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/edit_product/`, withFrontendKey({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ product_ids: selectedProductIds, quantity: 0 }),
-      }));
-
-      const result = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        toast.error(`❌ Failed: ${result?.error || 'Unknown error'}`);
-        return;
-      }
-
-      toast.success('📦 Selected products marked out of stock');
-
-      const refreshed = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey());
-      const parsed = await refreshed.json().catch(() => []);
-      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map((p: any) => ({
-        ...p,
-        brand_title: p.brand_title ?? '',
-        fit_description: p.fit_description ?? '',
-        sizes: Array.isArray(p.sizes) ? p.sizes : [],
-        images: [{ type: 'url', value: p.image || '', file: null }],
-        printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-        quantity: parseInt(p.stock_quantity, 10) || 0,
-      }));
-
-      setProducts(refreshedProds);
-      setSelectedProductIds([]);
-
-      if (Array.isArray(parsed)) {
-        const allSubcategories = [
-          ...new Map(parsed.map((p: any) => [p.subcategory.id, p.subcategory])).values(),
-        ];
-        const allProducts = (parsed as any[]).map((p: any) => ({
-          ...p,
-          brand_title: p.brand_title ?? '',
-          fit_description: p.fit_description ?? '',
-          sizes: Array.isArray(p.sizes) ? p.sizes : [],
-          images: [{ type: 'url', value: p.image || '', file: null }],
-          printingMethod: Array.isArray(p.printing_methods) ? p.printing_methods : [],
-          quantity: parseInt(p.stock_quantity, 10) || 0,
-        }));
-
-        setRawData([
-          {
-            name: 'All',
-            subcategories: allSubcategories.map((sub: any) => ({
-              ...sub,
-              category: 'All',
-              products: allProducts.filter((p) => p?.subcategory?.id === sub.id),
-            })),
-          },
-        ]);
-      }
-    } catch (err: any) {
-      toast.error(`❌ Failed: ${err.message}`);
-    }
-  };
-
-  const toggleSelectProduct = (id: string) => {
-    setSelectedProductIds((prev) =>
-      prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]
-    );
-  };
-
-  const filteredAndSortedProducts = [...products]
-    .filter((prod) => {
+  const filteredAndSortedProducts = useMemo(() => {
+    const base = [...products].filter((prod) => {
       const normalizedStatus = (prod.stock_status || '').trim().toLowerCase();
       const normalizedFilter = stockFilter.trim().toLowerCase();
       const isLow = Number(prod.quantity) > 0 && Number(prod.quantity) <= 5;
@@ -481,46 +297,67 @@ export default function AdminProductManager() {
       if (normalizedFilter === 'out') return normalizedStatus === 'out of stock';
       if (normalizedFilter === 'low') return normalizedStatus === 'low stock' || isLow;
       return true;
-    })
-    .sort((a, b) =>
-      sortOrder === 'asc' ? Number(a.price) - Number(b.price) :
-      sortOrder === 'desc' ? Number(b.price) - Number(a.price) : 0
-    );
-
-  const areAllSelected =
-    filteredAndSortedProducts.length > 0 &&
-    filteredAndSortedProducts.every((p) => selectedProductIds.includes(p.id));
-
-  const toggleSelectAll = () => {
-    if (areAllSelected) setSelectedProductIds([]);
-    else setSelectedProductIds(filteredAndSortedProducts.map((p) => p.id));
-  };
-
-  const handleDragEnd = async (result: DropResult) => {
-    if (!result.destination) return;
-
-    const reordered = Array.from(filteredAndSortedProducts);
-    const [moved] = reordered.splice(result.source.index, 1);
-    reordered.splice(result.destination.index, 0, moved);
-
-    setProducts((prev) => {
-      const idOrder = reordered.map((p) => p.id);
-      const mapPrev = new Map(prev.map((p) => [p.id, p]));
-      return idOrder.map((id) => mapPrev.get(id)).filter(Boolean) as any[];
     });
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/update-product-order/`, withFrontendKey({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ products: reordered.map((p) => ({ id: p.id })) }),
-      }));
-      if (!response.ok) throw new Error('Failed to update order');
-      toast.success('✅ Product order saved');
-    } catch (error) {
-      toast.error('❌ Failed to save product order');
+    if (sortOrder === 'asc') {
+      return base.sort((a, b) => Number(a.price) - Number(b.price));
     }
-  };
+    if (sortOrder === 'desc') {
+      return base.sort((a, b) => Number(b.price) - Number(a.price));
+    }
+    return base;
+  }, [products, sortOrder, stockFilter]);
+
+  const areAllSelected = useMemo(
+    () => filteredAndSortedProducts.length > 0 && filteredAndSortedProducts.every((p) => selectedProductIds.includes(p.id)),
+    [filteredAndSortedProducts, selectedProductIds]
+  );
+
+  const toggleSelectAll = useCallback(() => {
+    if (areAllSelected) setSelectedProductIds([]);
+    else setSelectedProductIds(filteredAndSortedProducts.map((p) => p.id));
+  }, [areAllSelected, filteredAndSortedProducts]);
+
+  // ---------- Drag & Drop ----------
+  const canReorder =
+    sortOrder === '' && stockFilter === 'all' && selectedSubCategory === '__all__' && !selectedCategory;
+
+  const handleDragEnd = useCallback(
+    async (result: DropResult) => {
+      if (!result.destination) return;
+      if (!canReorder) {
+        toast.info('Reordering is available only in the All view without filters/sorting.');
+        return;
+      }
+
+      const reordered = Array.from(filteredAndSortedProducts);
+      const [moved] = reordered.splice(result.source.index, 1);
+      reordered.splice(result.destination.index, 0, moved);
+
+      // Update local products according to new id order
+      setProducts((prev) => {
+        const idOrder = reordered.map((p) => p.id);
+        const mapPrev = new Map(prev.map((p) => [p.id, p]));
+        return idOrder.map((id) => mapPrev.get(id)).filter(Boolean) as any[];
+      });
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/api/update-product-order/`,
+          withFrontendKey({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ products: reordered.map((p) => ({ id: p.id })) }),
+          })
+        );
+        await parseJsonStrict(response, 'update-product-order');
+        toast.success('✅ Product order saved');
+      } catch (error: any) {
+        toast.error(`❌ Failed to save product order: ${error.message || error}`);
+      }
+    },
+    [canReorder, filteredAndSortedProducts]
+  );
 
   const ModalAny = Modal as unknown as React.ComponentType<any>;
 
@@ -557,7 +394,7 @@ export default function AdminProductManager() {
                 <option value="out">Out of Stock</option>
               </select>
 
-              <button className="bg-[#891F1A] text-white px-4 py-2 rounded" onClick={handleAddProduct}>
+              <button className="bg-[#891F1A] text-white px-4 py-2 rounded" onClick={() => { setEditingProductId(null); setIsModalOpen(true); }}>
                 + Add Product
               </button>
             </div>
@@ -679,7 +516,7 @@ export default function AdminProductManager() {
 
                                     <td className="p-4 text-center">
                                       <button
-                                        onClick={() => handleEditProduct(prod)}
+                                        onClick={() => { setEditingProductId(prod.id); setIsModalOpen(true); }}
                                         className="bg-[#891F1A] hover:bg-[#6e1915] text-white text-xs px-4 py-2 rounded-full transition"
                                       >
                                         View / Edit
@@ -708,26 +545,26 @@ export default function AdminProductManager() {
                 <span>Selected: {selectedProductIds.length}</span>
                 <button
                   onClick={handleBulkMarkOutOfStock}
-                  disabled={selectedProductIds.length === 0}
+                  disabled={selectedProductIds.length === 0 || isBulkOOS}
                   className={`px-3 py-1 rounded text-sm transition-colors duration-200 ${
-                    selectedProductIds.length === 0
+                    selectedProductIds.length === 0 || isBulkOOS
                       ? 'bg-gray-500 cursor-not-allowed text-white'
                       : 'bg-[#891F1A] hover:bg-red-700 text-white'
                   }`}
                 >
-                  Mark Out of Stock
+                  {isBulkOOS ? 'Marking…' : 'Mark Out of Stock'}
                 </button>
 
                 <button
                   onClick={handleDeleteMultiple}
-                  disabled={selectedProductIds.length === 0}
+                  disabled={selectedProductIds.length === 0 || isDeleting}
                   className={`px-3 py-1 rounded text-sm transition-colors duration-200 ${
-                    selectedProductIds.length === 0
+                    selectedProductIds.length === 0 || isDeleting
                       ? 'bg-gray-500 cursor-not-allowed text-white'
                       : 'bg-[#891F1A] hover:bg-red-700 text-white'
                   }`}
                 >
-                  Delete Selected
+                  {isDeleting ? 'Deleting…' : 'Delete Selected'}
                 </button>
               </div>
             </div>
@@ -738,25 +575,12 @@ export default function AdminProductManager() {
             onClose={() => {
               setIsModalOpen(false);
               setEditingProductId(null);
+              // On closing the modal, refresh the grid to reflect changes done inside the modal.
+              refreshProducts();
             }}
             onFirstImageUpload={() => {}}
             productId={editingProductId || undefined}
-          >
-            <div className="p-4 space-y-4 max-h-[80vh] overflow-y-auto">
-              <div className="mb-2 font-semibold">
-                {editingProductId ? 'Edit Product' : 'Add New Product'}
-              </div>
-
-              <div className="flex justify-end gap-4 sticky bottom-0 bg-white py-3">
-                <button onClick={() => setIsModalOpen(false)} className="bg-gray-300 text-black px-4 py-2 rounded">
-                  Back
-                </button>
-                <button onClick={handleSave} className="bg-green-600 text-white px-4 py-2 rounded">
-                  {editingProductId ? 'Update Product' : 'Save Product'}
-                </button>
-              </div>
-            </div>
-          </ModalAny>
+          />
         </main>
       </div>
     </AdminAuthGuard>
