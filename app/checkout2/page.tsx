@@ -13,9 +13,8 @@ import Footer from "../components/Footer";
 import { API_BASE_URL } from "../utils/api";
 import { ChatBot } from "../components/ChatBot";
 
-type ProductTuple = [string, string, string, number, string]; // [rowId, name, image, unitPrice, desc]
+type ProductTuple = [string, string, string, number, string];
 
-// 🔐 Inject X-Frontend-Key on every request
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
 const fetchWithKey = (url: string, init: RequestInit = {}) => {
   const headers = new Headers(init.headers || {});
@@ -28,7 +27,7 @@ type HumanAttr = {
   option_id?: string;
   attribute_name: string;
   option_label: string;
-  price_delta: string; // "0.00" from backend
+  price_delta: string;
 };
 
 export default function PaymentCheckoutPage() {
@@ -38,18 +37,14 @@ export default function PaymentCheckoutPage() {
     products: [],
   });
   const [loading, setLoading] = useState(true);
-
-  // quantity and price keyed by our internal row id (cart_item_id if present, else product_id|signature)
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
-
-  // extra metadata we’ll pass to the order payload (not shown in UI)
   const [cartMeta, setCartMeta] = useState<
     Record<
       string,
       {
         cart_item_id?: string;
-        product_id: string; // real product id for backend
+        product_id: string;
         selected_size?: string;
         selected_attributes?: Record<string, string>;
         selected_attributes_human?: HumanAttr[];
@@ -60,7 +55,6 @@ export default function PaymentCheckoutPage() {
       }
     >
   >({});
-
   const [discountCode, setDiscountCode] = useState("");
   const [userInfo, setUserInfo] = useState({
     name: "",
@@ -75,22 +69,16 @@ export default function PaymentCheckoutPage() {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem("cart_user_id");
-    if (storedToken) setToken(storedToken);
-  }, []);
-
-  useEffect(() => {
     const deviceUUID = localStorage.getItem("cart_user_id");
     if (!deviceUUID) {
-      console.warn("❌ No device UUID found in localStorage.");
       setLoading(false);
       return;
     }
+    setToken(deviceUUID);
 
     const fetchCart = async () => {
       try {
         setLoading(true);
-
         const res = await fetchWithKey(`${API_BASE_URL}/api/show-cart/`, {
           method: "POST",
           headers: {
@@ -101,6 +89,7 @@ export default function PaymentCheckoutPage() {
           cache: "no-store",
         });
 
+        if (!res.ok) throw new Error("Cart fetch failed");
         const data = await res.json();
         const items = data?.cart_items || [];
 
@@ -113,9 +102,7 @@ export default function PaymentCheckoutPage() {
           const cartItemId = item.cart_item_id;
           const productId = item.product_id;
           const signature = item.variant_signature || "";
-
-          // Robust unique row id
-          const rowId: string =
+          const rowId =
             cartItemId || `${productId}${signature ? `|${signature}` : ""}`;
 
           const unitPriceStr =
@@ -125,7 +112,6 @@ export default function PaymentCheckoutPage() {
             "0";
           const unitPriceNum = parseFloat(unitPriceStr) || 0;
 
-          // Merge human-readable selections for the small line under product name
           const size = (item.selected_size || "").toString().trim();
           const human: HumanAttr[] = Array.isArray(
             item.selected_attributes_human
@@ -139,7 +125,6 @@ export default function PaymentCheckoutPage() {
           );
           const selectionDesc = selectionParts.join(" • ");
 
-          // Fill UI lists
           q[rowId] = item.quantity || 1;
           p[rowId] = unitPriceNum;
           prod.push([
@@ -147,10 +132,9 @@ export default function PaymentCheckoutPage() {
             item.product_name,
             item.product_image || "/images/default.jpg",
             unitPriceNum,
-            selectionDesc, // show clean selections under name
+            selectionDesc,
           ]);
 
-          // Stash metadata used later, including base & deltas for WhatsApp message
           const basePriceNum =
             parseFloat(item?.price_breakdown?.base_price ?? "0") || 0;
           const lineTotalNum =
@@ -180,7 +164,7 @@ export default function PaymentCheckoutPage() {
         setCartData({ products: prod });
         setCartMeta(meta);
       } catch (err) {
-        console.error("❌ Cart fetch error:", err);
+        console.error("Cart fetch error:", err);
         setCartData({ products: [] });
       } finally {
         setLoading(false);
@@ -209,39 +193,27 @@ export default function PaymentCheckoutPage() {
   const removeItem = async (rowId: string) => {
     const meta = cartMeta[rowId];
     const realProductId = meta?.product_id || rowId;
+    const uid = token || localStorage.getItem("cart_user_id") || "";
 
-    // Optimistic UI updates
-    setQuantities((prev) => {
-      const copy = { ...prev };
-      delete copy[rowId];
-      return copy;
-    });
-
-    setCustomPrices((prev) => {
-      const copy = { ...prev };
-      delete copy[rowId];
-      return copy;
-    });
-
+    // optimistic UI
+    setQuantities(({ [rowId]: _, ...rest }) => rest);
+    setCustomPrices(({ [rowId]: __, ...rest }) => rest);
     setCartData((prev) => ({
       ...prev,
       products: prev.products.filter(([rid]) => rid !== rowId),
     }));
 
     try {
-      // Use variant_signature for precise deletion of this variant line
       const res = await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_id: token, // kept for compatibility
+          user_id: uid,
           product_id: realProductId,
           variant_signature: meta?.variant_signature || "",
         }),
       });
-
       if (!res.ok) throw new Error();
-
       Toastify({
         text: "Product removed from cart successfully",
         duration: 3000,
@@ -261,28 +233,13 @@ export default function PaymentCheckoutPage() {
   };
 
   const handleOrderNow = async () => {
-    // Build WhatsApp message with exact math format:
-    // Product (Paper Type: Simple, Size: 49): 3 x $(4 + 0 + 5) = $27
-    let msgLines: string[] = [
-      `Name: ${userInfo.name || "N/A"}`,
-      `Email: ${userInfo.email || "N/A"}`,
-      `Phone: ${userInfo.phone || "N/A"}`,
-      `Company: ${userInfo.company || "N/A"}`,
-      `Address: ${userInfo.address || "N/A"}`,
-      `City: ${userInfo.city || "N/A"}`,
-      `Zip: ${userInfo.zip || "N/A"}`,
-      `Instructions: ${userInfo.instructions || "N/A"}`,
-      ``,
-      `Order:`,
-    ];
-
-    // Basic validation for delivery
-    if (
-      !userInfo.email ||
-      !userInfo.address ||
-      !userInfo.city ||
-      !userInfo.phone
-    ) {
+    const required = [
+      userInfo.email,
+      userInfo.address,
+      userInfo.city,
+      userInfo.phone,
+    ].every(Boolean);
+    if (!required) {
       Toastify({
         text: "Please fill in all required delivery fields",
         duration: 3000,
@@ -291,6 +248,19 @@ export default function PaymentCheckoutPage() {
       return;
     }
 
+    const msgLines: string[] = [
+      `Name: ${userInfo.name || "N/A"}`,
+      `Email: ${userInfo.email || "N/A"}`,
+      `Phone: ${userInfo.phone || "N/A"}`,
+      `Company: ${userInfo.company || "N/A"}`,
+      `Address: ${userInfo.address || "N/A"}`,
+      `City: ${userInfo.city || "N/A"}`,
+      `Zip: ${userInfo.zip || "N/A"}`,
+      `Instructions: ${userInfo.instructions || "N/A"}`,
+      "",
+      "Order:",
+    ];
+
     const itemsForBackend: any[] = [];
 
     for (const [rowId, name] of cartData.products.map(
@@ -298,30 +268,26 @@ export default function PaymentCheckoutPage() {
     )) {
       const qty = quantities[rowId] || 1;
       const unitPrice = customPrices[rowId] || 0;
-      const meta = cartMeta[rowId]; // no {} fallback — keeps typing intact
+      const meta = cartMeta[rowId];
       const realProductId = meta?.product_id || rowId;
 
-      // Human-readable pieces for message
       const size = meta?.selected_size?.trim()
         ? `Size: ${meta.selected_size.trim()}`
         : "";
-      const humanRaw = meta?.selected_attributes_human;
-      const human: HumanAttr[] = Array.isArray(humanRaw) ? humanRaw : [];
+      const human: HumanAttr[] = Array.isArray(meta?.selected_attributes_human)
+        ? (meta?.selected_attributes_human as HumanAttr[])
+        : [];
 
-      const selectionTokens: string[] = [];
-      if (size) selectionTokens.push(size);
-      human.forEach((d) =>
-        selectionTokens.push(`${d.attribute_name}: ${d.option_label}`)
-      );
-      const selectionParen = selectionTokens.length
-        ? ` (${selectionTokens.join(", ")})`
+      const selection = [
+        size,
+        ...human.map((d) => `${d.attribute_name}: ${d.option_label}`),
+      ].filter(Boolean);
+      const selectionParen = selection.length
+        ? ` (${selection.join(", ")})`
         : "";
 
-      // Price math parts: base + ALL deltas (including zeros)
-      const base = meta?.base_price ?? unitPrice; // fallback if not sent
-      const deltas = (meta?.selected_attributes_human ?? []).map(
-        (d) => d.price_delta || "0"
-      );
+      const base = meta?.base_price ?? unitPrice;
+      const deltas = (human ?? []).map((d) => d.price_delta || "0");
       const mathParts = [base.toString(), ...deltas].join(" + ");
       const lineTotal = (unitPrice * qty).toFixed(2);
 
@@ -329,24 +295,22 @@ export default function PaymentCheckoutPage() {
         `${name}${selectionParen}: ${qty} x $(${mathParts}) = $${lineTotal}`
       );
 
-      // Backend payload item — includes human list + base_price
       itemsForBackend.push({
         product_id: realProductId,
-        quantity: parseInt(qty.toString()),
+        quantity: qty,
         unit_price: Number(unitPrice.toFixed(2)),
         total_price: Number((unitPrice * qty).toFixed(2)),
-
         selected_size: meta?.selected_size || "",
         selected_attributes: meta?.selected_attributes || {},
         selected_attributes_human: human,
-        base_price: meta?.base_price, // if undefined, omit
+        base_price: meta?.base_price,
         variant_signature: meta?.variant_signature || "",
         attributes_price_delta: meta?.attributes_price_delta ?? 0,
       });
     }
 
     msgLines.push(
-      ``,
+      "",
       `Subtotal: $${subtotal.toFixed(2)}`,
       `Tax: $${tax}`,
       `Shipping: $${shipping}`,
@@ -378,7 +342,6 @@ export default function PaymentCheckoutPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
       if (!res.ok) throw new Error(await res.text());
 
       Toastify({
@@ -387,37 +350,33 @@ export default function PaymentCheckoutPage() {
         backgroundColor: "#c41717ff",
       }).showToast();
 
-      // Clear Cart on frontend & backend
-      for (const [rowId] of cartData.products) {
+      // clear cart on backend in parallel
+      const deletions = cartData.products.map(([rowId]) => {
         const meta = cartMeta[rowId];
         const realProductId = meta?.product_id || rowId;
-        try {
-          await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              user_id: token,
-              product_id: realProductId,
-              variant_signature: meta?.variant_signature || "",
-            }),
-          });
-        } catch (err) {
-          console.warn(`❌ Failed to delete item ${rowId} after order:`, err);
-        }
-      }
+        return fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: token || localStorage.getItem("cart_user_id") || "",
+            product_id: realProductId,
+            variant_signature: meta?.variant_signature || "",
+          }),
+        });
+      });
+      await Promise.allSettled(deletions);
 
       setCartData({ products: [] });
       setQuantities({});
       setCustomPrices({});
 
-      // WhatsApp message with the detailed breakdown format
       const msg = msgLines.join("\n");
       window.open(
         `https://wa.me/923423773564?text=${encodeURIComponent(msg)}`,
         "_blank"
       );
     } catch (err) {
-      console.error("❌ Order save failed:", err);
+      console.error("Order save failed:", err);
       Toastify({
         text: "Failed to place order",
         duration: 3000,
@@ -452,7 +411,6 @@ export default function PaymentCheckoutPage() {
       <MobileTopBar />
 
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Delivery Section */}
         <div className="bg-white shadow rounded-lg p-8">
           <h2 className="text-2xl font-semibold mb-6 text-black">
             Delivery Address
@@ -495,18 +453,16 @@ export default function PaymentCheckoutPage() {
           <button
             onClick={handleOrderNow}
             disabled={cartData.products.length === 0}
-            className={`w-full mt-8 py-3 text-sm font-medium rounded-md transition-all
-              ${
-                cartData.products.length === 0
-                  ? "bg-gray-300 text-gray-600 cursor-not-allowed"
-                  : "bg-[#891F1A] text-white hover:bg-[#6e1815]"
-              }`}
+            className={`w-full mt-8 py-3 text-sm font-medium rounded-md transition-all ${
+              cartData.products.length === 0
+                ? "bg-gray-300 text-gray-600 cursor-not-allowed"
+                : "bg-[#891F1A] text-white hover:bg-[#6e1815]"
+            }`}
           >
             Order Now
           </button>
         </div>
 
-        {/* Order Summary */}
         <div className="bg-white shadow rounded-lg p-8">
           <h3 className="text-2xl font-semibold mb-6 text-black">Order</h3>
           <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
@@ -526,7 +482,6 @@ export default function PaymentCheckoutPage() {
                 />
                 <div className="flex-1 ml-4 text-sm min-w-[160px]">
                   <p className="font-medium line-clamp-1">{item.name}</p>
-                  {/* show human selections under product name */}
                   {item.desc ? (
                     <p className="text-xs text-gray-600 mt-0.5">{item.desc}</p>
                   ) : null}
@@ -547,8 +502,6 @@ export default function PaymentCheckoutPage() {
                   </button>
                 </div>
                 <div className="flex flex-col items-end ml-4 space-y-1">
-                  {/* You can show price if needed:
-                  <span className="text-sm font-medium">${(item.price * item.quantity).toFixed(2)}</span> */}
                   <button onClick={() => removeItem(item.id)}>
                     <Trash2 size={14} className="text-red-600" />
                   </button>
@@ -557,7 +510,6 @@ export default function PaymentCheckoutPage() {
             ))}
           </div>
 
-          {/* Discount */}
           <div className="mt-6">
             <label className="text-sm font-medium text-black mb-1 block">
               Discount Code
@@ -584,7 +536,6 @@ export default function PaymentCheckoutPage() {
             </div>
           </div>
 
-          {/* Totals */}
           <div className="mt-6 border-t pt-4 space-y-2 text-black">
             <div className="flex justify-between text-sm">
               <span>Subtotal</span>

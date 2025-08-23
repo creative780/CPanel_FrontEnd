@@ -8,9 +8,7 @@ import { motion } from "framer-motion";
 import axios, { AxiosHeaders, InternalAxiosRequestConfig } from "axios";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
 import {
-  FaBoxOpen,
   FaTruck,
   FaCheck,
   FaClock,
@@ -18,10 +16,10 @@ import {
   FaShoppingCart,
   FaUserAlt,
   FaSyncAlt,
+  FaBoxOpen,
 } from "react-icons/fa";
 import { API_BASE_URL } from "../../../utils/api";
 
-// ---------- Types ----------
 type AttributeOption = {
   id: string;
   label: string;
@@ -47,32 +45,23 @@ type OrderItem = {
 type LoadedOrder = {
   id: string;
   date: string;
-  customer: {
-    name: string;
-    email: string;
-    address: string;
-  };
+  customer: { name: string; email: string; address: string };
   items: OrderItem[];
   total: number;
   status: string;
   notes: string[];
 };
 
-// ---------- Axios with Frontend Key ----------
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
-
 const axiosWithKey = axios.create();
 axiosWithKey.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  if (!config.headers) {
-    config.headers = new AxiosHeaders();
-  } else if (!(config.headers instanceof AxiosHeaders)) {
+  if (!config.headers) config.headers = new AxiosHeaders();
+  else if (!(config.headers instanceof AxiosHeaders))
     config.headers = AxiosHeaders.from(config.headers);
-  }
   (config.headers as AxiosHeaders).set("X-Frontend-Key", FRONTEND_KEY);
   return config;
 });
 
-// ---------- helpers ----------
 const toAbsUrl = (src?: string | null) => {
   if (!src) return "";
   if (/^https?:/i.test(src)) return src;
@@ -80,22 +69,18 @@ const toAbsUrl = (src?: string | null) => {
   const path = String(src).replace(/^\/+/, "");
   return `${base}/${path}`;
 };
-
 const norm = (s: any) =>
   String(s ?? "")
     .trim()
     .toLowerCase();
 
-// Try to extract product IDs from multiple possible shapes of `found.item`
 function extractIdsFlexible(found: any): string[] | null {
   const item = found?.item;
-
   if (Array.isArray(item?.ids) && item.ids.length) return item.ids.map(String);
   if (Array.isArray(item?.product_ids) && item.product_ids.length)
     return item.product_ids.map(String);
   if (Array.isArray(item?.productIds) && item.productIds.length)
     return item.productIds.map(String);
-
   if (Array.isArray(item?.items) && item.items.length) {
     const ids = item.items
       .map((x: any) => x?.product_id ?? x?.id ?? x?.productId)
@@ -103,12 +88,9 @@ function extractIdsFlexible(found: any): string[] | null {
       .map(String);
     if (ids.length) return ids;
   }
-
   return null;
 }
 
-// Extract selected attributes mapping in flexible ways.
-// Returns: { [productId]: { [attrId]: optionId } }
 function extractSelectionsFlexible(
   found: any,
   idsAligned?: string[] | null
@@ -116,7 +98,6 @@ function extractSelectionsFlexible(
   const map: Record<string, Record<string, string>> = {};
   const item = found?.item;
 
-  // Case A: item.items = [{ product_id, selected_attributes }, ...]
   if (Array.isArray(item?.items)) {
     for (const it of item.items) {
       const pid = String(it?.product_id ?? it?.productId ?? it?.id ?? "");
@@ -131,7 +112,6 @@ function extractSelectionsFlexible(
     if (Object.keys(map).length) return map;
   }
 
-  // Case B: item.selected_attributes_map = { [productId]: { attrId: optionId } }
   if (
     item?.selected_attributes_map &&
     typeof item.selected_attributes_map === "object"
@@ -143,8 +123,6 @@ function extractSelectionsFlexible(
     if (Object.keys(map).length) return map;
   }
 
-  // Case C: arrays aligned to ids/names: item.selected_attributes (array)
-  // e.g., selected_attributes[i] corresponds to ids[i]
   if (
     Array.isArray(item?.selected_attributes) &&
     Array.isArray(idsAligned) &&
@@ -160,12 +138,9 @@ function extractSelectionsFlexible(
     }
     if (Object.keys(map).length) return map;
   }
-
-  // Case D: nothing recognized
   return {};
 }
 
-// Fallback: build name→id map from /api/show-product/ then align by names[]
 async function fallbackIdsByName(names: string[]): Promise<string[] | null> {
   try {
     const res = await axiosWithKey.get(`${API_BASE_URL}/api/show-product/`);
@@ -190,7 +165,6 @@ async function fallbackIdsByName(names: string[]): Promise<string[] | null> {
       const loose = byNameNorm.get(norm(title));
       ids.push(String(exact || loose || ""));
     }
-
     if (ids.some(Boolean)) return ids;
     return null;
   } catch {
@@ -198,7 +172,6 @@ async function fallbackIdsByName(names: string[]): Promise<string[] | null> {
   }
 }
 
-// ---------- Component ----------
 export default function OrderDetailPage() {
   const params = useParams();
   const orderId = (
@@ -212,12 +185,9 @@ export default function OrderDetailPage() {
   const [newNote, setNewNote] = useState("");
   const [error, setError] = useState("");
 
-  // product_id -> attributes[]
   const [attributesByProduct, setAttributesByProduct] = useState<
     Record<string, ProductAttribute[]>
   >({});
-
-  // product_id -> { attrId: optionId }
   const [selectedByProduct, setSelectedByProduct] = useState<
     Record<string, Record<string, string>>
   >({});
@@ -238,7 +208,6 @@ export default function OrderDetailPage() {
         `${API_BASE_URL}/api/show_product_attributes/`,
         { product_id: productId }
       );
-
       const normalized: ProductAttribute[] = (
         Array.isArray(data) ? data : []
       ).map((a: any) => ({
@@ -249,19 +218,12 @@ export default function OrderDetailPage() {
           label: o.label,
           image_id: o.image_id ?? null,
           image_url: toAbsUrl(o.image_url),
-          price_delta:
-            o.price_delta === null || o.price_delta === undefined
-              ? 0
-              : Number(o.price_delta),
+          price_delta: o.price_delta == null ? 0 : Number(o.price_delta),
           is_default: !!o.is_default,
         })),
       }));
-
-      setAttributesByProduct((prev) => ({
-        ...prev,
-        [productId]: normalized,
-      }));
-    } catch (e) {
+      setAttributesByProduct((prev) => ({ ...prev, [productId]: normalized }));
+    } catch {
       setAttributesByProduct((prev) => ({ ...prev, [productId]: [] }));
     }
   };
@@ -272,7 +234,6 @@ export default function OrderDetailPage() {
         const res = await axiosWithKey.get(`${API_BASE_URL}/api/show-order/`);
         const orders = res.data?.orders || [];
         const found = orders.find((o: any) => o.orderID === orderId);
-
         if (!found) {
           setError("❌ Invalid order ID");
           return;
@@ -283,15 +244,12 @@ export default function OrderDetailPage() {
         const unitPrice = count > 0 ? (Number(found.total) || 0) / count : 0;
 
         let ids: string[] | null = extractIdsFlexible(found);
-        if (!ids || ids.length === 0) {
-          ids = await fallbackIdsByName(names);
-        }
-        if (!ids || ids.length !== names.length) {
+        if (!ids || ids.length === 0) ids = await fallbackIdsByName(names);
+        if (!ids || ids.length !== names.length)
           console.warn("Order items missing aligned product IDs.", {
             names,
             ids,
           });
-        }
 
         const items: OrderItem[] = names.map((title: string, i: number) => ({
           title,
@@ -300,7 +258,6 @@ export default function OrderDetailPage() {
           productId: ids?.[i] || undefined,
         }));
 
-        // Parse selected attributes (if provided)
         const selectedMap = extractSelectionsFlexible(found, ids);
 
         const hydrated: LoadedOrder = {
@@ -323,27 +280,22 @@ export default function OrderDetailPage() {
         setStatus(capitalizeStatus(hydrated.status));
         setSelectedByProduct(selectedMap);
 
-        // Fetch attributes for rows that have productId
         const pids = items
           .map((it) => it.productId)
           .filter(Boolean) as string[];
-        if (pids.length) {
+        if (pids.length)
           await Promise.all(pids.map((pid) => fetchProductAttributes(pid)));
-        }
       } catch (err) {
         console.error(err);
         setError("❌ Failed to fetch order");
       }
     };
-
     if (orderId) fetchOrder();
   }, [orderId]);
 
-  // Push status changes to backend
   useEffect(() => {
     if (!order || !status) return;
     if (status.toLowerCase() === order.status.toLowerCase()) return;
-
     const updateStatus = async () => {
       try {
         await axiosWithKey.put(`${API_BASE_URL}/api/edit-order/`, {
@@ -351,11 +303,10 @@ export default function OrderDetailPage() {
           status: status.toLowerCase(),
         });
         toast.success(`Status updated to ${status}`);
-      } catch (err) {
+      } catch {
         toast.error("❌ Failed to update order status");
       }
     };
-
     updateStatus();
   }, [status, order]);
 
@@ -409,23 +360,18 @@ export default function OrderDetailPage() {
     }
   };
 
-  // pickSelectedLabel: given a productId and attribute, find the chosen option.
   const pickSelectedLabel = (
     productId: string,
     attr: ProductAttribute
   ): { label: string; price_delta?: number } | null => {
     const chosenMap = selectedByProduct[productId] || {};
     const chosenOptId = chosenMap[attr.id];
-
-    // 1) If we have a selection, use it
     if (chosenOptId) {
       const opt = (attr.options || []).find((o) => o.id === chosenOptId);
       if (opt) return { label: opt.label, price_delta: opt.price_delta };
     }
-    // 2) Fallback to default
     const def = (attr.options || []).find((o) => o.is_default);
     if (def) return { label: def.label, price_delta: def.price_delta };
-    // 3) Fallback to first option
     const first = attr.options?.[0];
     if (first) return { label: first.label, price_delta: first.price_delta };
     return null;
@@ -438,7 +384,6 @@ export default function OrderDetailPage() {
       </div>
     );
   }
-
   if (!order) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50 text-gray-400 text-lg">
@@ -451,7 +396,6 @@ export default function OrderDetailPage() {
     <AdminAuthGuard>
       <div className="flex">
         <AdminSidebar />
-
         <motion.div
           className="flex-1 px-4 sm:px-6 py-8 bg-gray-50 min-h-screen"
           initial={{ opacity: 0, y: 10 }}
@@ -478,7 +422,6 @@ export default function OrderDetailPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
-              {/* Customer */}
               <section>
                 <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-700 mb-3">
                   <FaUserAlt /> Customer Info
@@ -496,17 +439,14 @@ export default function OrderDetailPage() {
                 </div>
               </section>
 
-              {/* Items + Selected Attributes ONLY */}
               <section>
                 <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-700 mb-3">
                   <FaShoppingCart /> Ordered Items
                 </h2>
-
                 <ul className="divide-y divide-gray-100 text-sm text-gray-700">
                   {order.items.map((item, i) => {
                     const pid = item.productId;
                     const attrs = pid ? attributesByProduct[pid] : undefined;
-
                     return (
                       <motion.li
                         key={i}
@@ -515,7 +455,6 @@ export default function OrderDetailPage() {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: i * 0.08 }}
                       >
-                        {/* Line item header */}
                         <div className="flex items-start justify-between">
                           <span className="text-sm text-gray-800">
                             {item.title}{" "}
@@ -527,8 +466,6 @@ export default function OrderDetailPage() {
                             ${(item.price * item.quantity).toFixed(2)}
                           </span>
                         </div>
-
-                        {/* Selected attribute lines */}
                         {pid ? (
                           attrs?.length ? (
                             <div className="mt-2 space-y-1">
@@ -562,13 +499,11 @@ export default function OrderDetailPage() {
                     );
                   })}
                 </ul>
-
                 <p className="mt-4 font-semibold text-right text-lg text-green-700">
                   Total: ${order.total.toFixed(2)}
                 </p>
               </section>
 
-              {/* Status */}
               <section>
                 <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-700 mb-3">
                   <FaBoxOpen /> Order Status
@@ -588,7 +523,6 @@ export default function OrderDetailPage() {
                 </div>
               </section>
 
-              {/* Notes */}
               <section>
                 <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-700 mb-3">
                   <FaStickyNote /> Internal Notes
