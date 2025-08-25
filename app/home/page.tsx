@@ -2,13 +2,13 @@
 
 import React, {
   useEffect,
-  useMemo,
   useRef,
   useState,
   useCallback,
   Suspense,
+  memo,
 } from "react";
-import "toastify-js/src/toastify.css"; // ✅ static CSS import (no TS errors)
+import "toastify-js/src/toastify.css";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Navbar from "../components/Navbar";
@@ -24,7 +24,7 @@ import {
 } from "react-icons/fa";
 import { API_BASE_URL } from "../utils/api";
 
-// 🔐 Frontend key helper (adds X-Frontend-Key to requests)
+/* ----------------------------- frontend key ----------------------------- */
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
@@ -32,7 +32,7 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-// Code-split heavy modules (with safe loaders)
+/* --------------------------- dynamic imports ---------------------------- */
 const Carousel = dynamic(() => import("../components/Carousel"), {
   ssr: false,
   loading: () => (
@@ -49,17 +49,15 @@ const SecondCarousel = dynamic(() => import("../components/second_carousel"), {
     <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
   ),
 });
-// ✅ ChatBot is a NAMED export; pick it off the module
 const ChatBot = dynamic(
   () => import("../components/ChatBot").then((m) => m.ChatBot),
   { ssr: false, loading: () => null }
 );
-// Footer likely default export; keep it split too
 const Footer = dynamic(() => import("../components/Footer"), {
   loading: () => <div className="h-24 w-full bg-gray-100 animate-pulse" />,
 });
 
-// Types
+/* -------------------------------- types -------------------------------- */
 type Category = {
   id: number | string;
   name: string;
@@ -70,7 +68,7 @@ type Category = {
 const FALLBACK_IMG =
   "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/ZfQW3qI2ok/ymeg8jht_expires_30_days.png";
 
-/* ----------------------------- utils -------------------------------- */
+/* ------------------------------- helpers -------------------------------- */
 const safeJoin = (base: string, path?: string) => {
   if (!path) return "";
   if (!base || /^https?:\/\//i.test(path)) return path;
@@ -78,7 +76,28 @@ const safeJoin = (base: string, path?: string) => {
 };
 const toKebab = (s: string) => s.toLowerCase().trim().replace(/\s+/g, "-");
 
-/* -------------------------- slider hook ------------------------------ */
+/* --------------------------- intersection hook -------------------------- */
+function useInView<T extends Element>(opts?: IntersectionObserverInit) {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (!ref.current) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: "200px 0px", threshold: 0.01, ...opts }
+    );
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, []);
+  return { ref, inView } as const;
+}
+
+/* ------------------------------ slider hook ----------------------------- */
 function useAutoSlider(
   length: number,
   delayMs: number,
@@ -132,14 +151,14 @@ function useAutoSlider(
   return [index, setIndex] as const;
 }
 
-/* --------------------------- memo children --------------------------- */
+/* ---------------------------- memoized items ---------------------------- */
 const ContactItem: React.FC<{
   icon: React.ReactNode;
   title: string;
   value: string;
   href: string;
   color: string;
-}> = React.memo(({ icon, title, value, href, color }) => (
+}> = memo(({ icon, title, value, href, color }) => (
   <a
     href={href}
     target="_blank"
@@ -164,23 +183,21 @@ const ContactItem: React.FC<{
   </a>
 ));
 
-const CategoryCard: React.FC<{ category: Category; apiBase: string }> =
-  React.memo(({ category, apiBase }) => {
+const CategoryCard: React.FC<{ category: Category; apiBase: string }> = memo(
+  ({ category, apiBase }) => {
     const href = `/home/${toKebab(category.name)}`;
     const imgSrc = safeJoin(apiBase, category.image) || "/images/img1.jpg";
     return (
       <Link href={href} passHref>
-        <div className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform duration-300">
+        <div className="flex flex-col items-center cursor-pointer sm:hover:scale-105 sm:transition-transform sm:duration-300">
           <Image
             src={imgSrc}
             alt={category.name}
             width={640}
             height={480}
             className="w-full h-auto object-cover rounded-lg"
-            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 320px"
-            // Next/Image doesn't let us easily change src in onError reliably across versions.
-            // We rely on server-provided URLs; if broken, Next shows a broken icon.
-            // Optional: add blurDataURL + placeholder="blur" if you have tiny thumbs.
+            sizes="(max-width: 640px) 45vw, (max-width: 1024px) 22vw, 320px"
+            decoding="async"
           />
           <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
             {category.name}
@@ -188,18 +205,28 @@ const CategoryCard: React.FC<{ category: Category; apiBase: string }> =
         </div>
       </Link>
     );
-  });
+  }
+);
 
-/* ------------------------------ page -------------------------------- */
+/* --------------------------------- page -------------------------------- */
 export default function PrintingServicePage() {
   const [desktopImages, setDesktopImages] = useState<string[]>([FALLBACK_IMG]);
   const [mobileImages, setMobileImages] = useState<string[]>([FALLBACK_IMG]);
   const [categories, setCategories] = useState<Category[]>([]);
 
-  // hero container refs for slider pause when off-screen
+  // media query: only mount heavy stuff on ≥sm
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const q = window.matchMedia("(min-width: 640px)");
+    const apply = () => setIsDesktop(q.matches);
+    apply();
+    q.addEventListener?.("change", apply);
+    return () => q.removeEventListener?.("change", apply);
+  }, []);
+
+  // hero refs + sliders
   const desktopHeroRef = useRef<HTMLDivElement | null>(null);
   const mobileHeroRef = useRef<HTMLDivElement | null>(null);
-
   const [desktopIndex, setDesktopIndex] = useAutoSlider(
     desktopImages.length,
     4000,
@@ -211,7 +238,13 @@ export default function PrintingServicePage() {
     mobileHeroRef
   );
 
-  // Fetch hero images
+  // lazy mount sentinels
+  const firstCarouselSentinel = useInView<HTMLDivElement>();
+  const secondCarouselSentinel = useInView<HTMLDivElement>();
+  const reviewsSentinel = useInView<HTMLDivElement>();
+  const chatBotSentinel = useInView<HTMLDivElement>();
+
+  /* ----------------------------- fetch hero ---------------------------- */
   useEffect(() => {
     const ac = new AbortController();
     (async () => {
@@ -255,7 +288,6 @@ export default function PrintingServicePage() {
           setMobileImages([FALLBACK_IMG]);
         }
       } finally {
-        // reset indexes so Image 'priority' logic stays sane
         setDesktopIndex(0);
         setMobileIndex(0);
       }
@@ -263,7 +295,7 @@ export default function PrintingServicePage() {
     return () => ac.abort();
   }, [setDesktopIndex, setMobileIndex]);
 
-  // Fetch categories
+  /* --------------------------- fetch categories ------------------------- */
   useEffect(() => {
     const ac = new AbortController();
     (async () => {
@@ -271,7 +303,7 @@ export default function PrintingServicePage() {
         const res = await fetch(`${API_BASE_URL}/api/show-categories/`, {
           ...withFrontendKey(),
           signal: ac.signal,
-          cache: "no-store",
+          cache: "force-cache", // allow caching on mobile
         });
         if (!res.ok) throw new Error(String(res.status));
         const data: Category[] = await res.json();
@@ -281,55 +313,51 @@ export default function PrintingServicePage() {
           )
         );
       } catch {
-        /* silent fail */
+        /* silent */
       }
     })();
     return () => ac.abort();
   }, []);
 
-  const contactItems = useMemo(
-    () => [
-      {
-        icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
-        title: "Whatsapp",
-        value: "+971 50 279 3948",
-        href: "https://wa.me/971502793948",
-        color: "#014C3D",
-      },
-      {
-        icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
-        title: "Call",
-        value: "+971 54 539 6249",
-        href: "tel:+971545396249",
-        color: "#00B7FF",
-      },
-      {
-        icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
-        title: "Find Us",
-        value: "Naif – Deira – Dubai",
-        href: "https://maps.google.com/?q=Naif+Deira+Dubai",
-        color: "#891F1A",
-      },
-      {
-        icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
-        title: "Email",
-        value: "ccaddxb@gmail.com",
-        href: "mailto:ccaddxb@gmail.com",
-        color: "#E6492D",
-      },
-    ],
-    []
-  );
+  /* ------------------------------- contact ------------------------------ */
+  const contactItems = [
+    {
+      icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
+      title: "Whatsapp",
+      value: "+971 50 279 3948",
+      href: "https://wa.me/971502793948",
+      color: "#014C3D",
+    },
+    {
+      icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
+      title: "Call",
+      value: "+971 54 539 6249",
+      href: "tel:+971545396249",
+      color: "#00B7FF",
+    },
+    {
+      icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
+      title: "Find Us",
+      value: "Naif – Deira – Dubai",
+      href: "https://maps.google.com/?q=Naif+Deira+Dubai",
+      color: "#891F1A",
+    },
+    {
+      icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
+      title: "Email",
+      value: "ccaddxb@gmail.com",
+      href: "mailto:ccaddxb@gmail.com",
+      color: "#E6492D",
+    },
+  ] as const;
 
-  // Toast on-demand import (JS only; CSS is already at top)
+  /* ------------------------------ toast/form ---------------------------- */
   const [isSubmitted, setIsSubmitted] = useState(false);
   const handleSubmit = useCallback(
     async (e: React.FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       setIsSubmitted(true);
-
       const { default: Toastify } = await import("toastify-js");
-
       Toastify({
         text: "We'll Call you back soon",
         duration: 3000,
@@ -337,14 +365,13 @@ export default function PrintingServicePage() {
         position: "right",
         backgroundColor: "linear-gradient(to right, #00b09b, #96c93d)",
       }).showToast();
-
       e.currentTarget.reset();
       window.setTimeout(() => setIsSubmitted(false), 4000);
     },
     []
   );
 
-  /* -------------------------------- UI ------------------------------- */
+  /* --------------------------------- UI --------------------------------- */
   return (
     <div className="flex flex-col bg-white">
       <Header />
@@ -353,20 +380,21 @@ export default function PrintingServicePage() {
       <MobileTopBar />
 
       {/* Hero Images (desktop) */}
-      <div ref={desktopHeroRef}>
+      <div ref={desktopHeroRef as any}>
         <Image
           src={desktopImages[desktopIndex] || FALLBACK_IMG}
           alt="Hero Desktop"
           width={1440}
           height={400}
           className="hidden sm:block w-full h-auto mx-auto"
-          priority
+          priority={false} // desktop not LCP on phones
           sizes="100vw"
+          decoding="async"
         />
       </div>
 
       {/* Hero Images (mobile) */}
-      <div ref={mobileHeroRef}>
+      <div ref={mobileHeroRef as any}>
         <Image
           src={mobileImages[mobileIndex] || FALLBACK_IMG}
           alt="Hero Mobile"
@@ -374,16 +402,27 @@ export default function PrintingServicePage() {
           height={300}
           className="block sm:hidden w-full h-auto object-cover mx-auto"
           sizes="100vw"
+          priority // make mobile hero the LCP
         />
       </div>
 
-      <Suspense
-        fallback={
-          <div className="h-[220px] sm:h-[280px] w-full animate-pulse bg-gray-100" />
-        }
+      {/* First Carousel - lazy mount when visible; keep skeleton until then */}
+      <div
+        ref={firstCarouselSentinel.ref}
+        style={{ contentVisibility: "auto", containIntrinsicSize: "280px" }}
       >
-        <Carousel />
-      </Suspense>
+        <Suspense
+          fallback={
+            <div className="h-[220px] sm:h-[280px] w-full animate-pulse bg-gray-100" />
+          }
+        >
+          {firstCarouselSentinel.inView ? (
+            <Carousel />
+          ) : (
+            <div className="h-[220px] sm:h-[280px] w-full bg-gray-100" />
+          )}
+        </Suspense>
+      </div>
 
       <Image
         src="/images/Banner3.jpg"
@@ -392,10 +431,14 @@ export default function PrintingServicePage() {
         height={250}
         className="block bg-[#D9D9D9] w-full h-auto mx-auto"
         sizes="100vw"
+        decoding="async"
       />
 
       {/* Categories */}
-      <div className="px-4 sm:px-6 lg:px-24 py-8">
+      <section
+        className="px-3 sm:px-6 lg:px-24 py-6 sm:py-8"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "800px" }}
+      >
         <h2 className="text-[#891F1A] text-2xl sm:text-3xl font-bold text-center mb-6">
           Discover our categories
         </h2>
@@ -412,7 +455,7 @@ export default function PrintingServicePage() {
                 <CategoryCard key={c.id} category={c} apiBase={API_BASE_URL} />
               ))}
         </div>
-      </div>
+      </section>
 
       <Image
         src="/images/Banner2.jpg"
@@ -421,26 +464,50 @@ export default function PrintingServicePage() {
         height={250}
         className="block bg-[#D9D9D9] w-full h-auto"
         sizes="100vw"
+        decoding="async"
       />
 
-      <Suspense
-        fallback={
-          <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
-        }
+      {/* Second Carousel (desktop only, and only when in view) */}
+      <div
+        ref={secondCarouselSentinel.ref}
+        style={{ contentVisibility: "auto", containIntrinsicSize: "260px" }}
       >
-        <SecondCarousel />
-      </Suspense>
+        <Suspense
+          fallback={
+            <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
+          }
+        >
+          {isDesktop && secondCarouselSentinel.inView ? (
+            <SecondCarousel /* active */ />
+          ) : (
+            <div className="h-[200px] sm:h-[260px] w-full bg-gray-100" />
+          )}
+        </Suspense>
+      </div>
 
-      <Suspense
-        fallback={
-          <div className="h-[320px] w-full animate-pulse bg-gray-100" />
-        }
+      {/* Reviews (desktop only, and only when in view) */}
+      <div
+        ref={reviewsSentinel.ref}
+        style={{ contentVisibility: "auto", containIntrinsicSize: "320px" }}
       >
-        <Reviews />
-      </Suspense>
+        <Suspense
+          fallback={
+            <div className="h-[320px] w-full animate-pulse bg-gray-100" />
+          }
+        >
+          {isDesktop && reviewsSentinel.inView ? (
+            <Reviews /* active */ />
+          ) : (
+            <div className="h-[320px] w-full bg-gray-100" />
+          )}
+        </Suspense>
+      </div>
 
       {/* CTA */}
-      <section className="flex flex-col lg:flex-row gap-8 items-center px-4 sm:px-6 lg:px-24 py-12 bg-white">
+      <section
+        className="flex flex-col lg:flex-row gap-8 items-center px-3 sm:px-6 lg:px-24 py-10 sm:py-12 bg-white"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "700px" }}
+      >
         <div className="flex-1">
           <p className="text-[#837E8C] text-sm font-semibold mb-2">
             Call To Action
@@ -456,7 +523,7 @@ export default function PrintingServicePage() {
 
           <form
             onSubmit={handleSubmit}
-            className="mt-10 space-y-6 max-w-md"
+            className="mt-8 space-y-5 max-w-md"
             noValidate
           >
             <div>
@@ -477,7 +544,7 @@ export default function PrintingServicePage() {
               />
             </div>
 
-            <div className="mt-6">
+            <div>
               <label
                 htmlFor="phone"
                 className="block text-sm font-semibold text-gray-700 mb-1"
@@ -525,13 +592,17 @@ export default function PrintingServicePage() {
           </form>
         </div>
 
-        <div className="w-full mr-[10px] sm:w-[500px] h-[600px] bg-[#8B8491] rounded-xl" />
+        {/* kill the gray brick on mobile; keep desktop visual */}
+        <div className="hidden lg:block w-[500px] h-[600px] bg-[#8B8491] rounded-xl" />
       </section>
 
-      <div className="w-full bg-white h-[100px]" />
+      <div className="w-full bg-white h-[80px]" />
 
       {/* Contact Info */}
-      <section className="bg-[#FAFAFA] px-4 sm:px-6 lg:px-24 py-8">
+      <section
+        className="bg-[#FAFAFA] px-3 sm:px-6 lg:px-24 py-6"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "300px" }}
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
           {contactItems.map((it, idx) => (
             <ContactItem
@@ -547,7 +618,11 @@ export default function PrintingServicePage() {
       </section>
 
       <Footer />
-      <ChatBot />
+
+      {/* Chatbot: desktop only, and only when near viewport */}
+      <div ref={chatBotSentinel.ref}>
+        {isDesktop && chatBotSentinel.inView && <ChatBot />}
+      </div>
     </div>
   );
 }
