@@ -5,14 +5,15 @@ import React, {
   useMemo,
   useRef,
   useState,
-  Suspense,
   useCallback,
+  Suspense,
 } from "react";
-import "toastify-js/src/toastify.css";
+import "toastify-js/src/toastify.css"; // ✅ static CSS import (no TS errors)
+import dynamic from "next/dynamic";
+import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Header from "../components/header";
 import LogoSection from "../components/LogoSection";
-import Footer from "../components/Footer";
 import MobileTopBar from "../components/HomePageTop";
 import Link from "next/link";
 import {
@@ -21,10 +22,7 @@ import {
   FaPhoneAlt,
   FaWhatsapp,
 } from "react-icons/fa";
-import Toastify from "toastify-js";
 import { API_BASE_URL } from "../utils/api";
-import { ChatBot } from "../components/ChatBot";
-import dynamic from "next/dynamic";
 
 // 🔐 Frontend key helper (adds X-Frontend-Key to requests)
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
@@ -34,7 +32,7 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-// ✂️ Code-split heavy sections with proper Suspense fallbacks
+// Code-split heavy modules (with safe loaders)
 const Carousel = dynamic(() => import("../components/Carousel"), {
   ssr: false,
   loading: () => (
@@ -51,6 +49,15 @@ const SecondCarousel = dynamic(() => import("../components/second_carousel"), {
     <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
   ),
 });
+// ✅ ChatBot is a NAMED export; pick it off the module
+const ChatBot = dynamic(
+  () => import("../components/ChatBot").then((m) => m.ChatBot),
+  { ssr: false, loading: () => null }
+);
+// Footer likely default export; keep it split too
+const Footer = dynamic(() => import("../components/Footer"), {
+  loading: () => <div className="h-24 w-full bg-gray-100 animate-pulse" />,
+});
 
 // Types
 type Category = {
@@ -60,39 +67,153 @@ type Category = {
   status?: "visible" | "hidden";
 };
 
-export default function PrintingServicePage() {
-  const fallbackImage =
-    "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/ZfQW3qI2ok/ymeg8jht_expires_30_days.png";
+const FALLBACK_IMG =
+  "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/ZfQW3qI2ok/ymeg8jht_expires_30_days.png";
 
-  // Hero state
-  const [desktopImages, setDesktopImages] = useState<string[]>([fallbackImage]);
-  const [mobileImages, setMobileImages] = useState<string[]>([fallbackImage]);
-  const [desktopIndex, setDesktopIndex] = useState(0);
-  const [mobileIndex, setMobileIndex] = useState(0);
+/* ----------------------------- utils -------------------------------- */
+const safeJoin = (base: string, path?: string) => {
+  if (!path) return "";
+  if (!base || /^https?:\/\//i.test(path)) return path;
+  return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+};
+const toKebab = (s: string) => s.toLowerCase().trim().replace(/\s+/g, "-");
 
-  // Data state
-  const [categories, setCategories] = useState<Category[]>([]);
+/* -------------------------- slider hook ------------------------------ */
+function useAutoSlider(
+  length: number,
+  delayMs: number,
+  rootRef: React.RefObject<HTMLElement | null>
+) {
+  const [index, setIndex] = useState(0);
+  const timer = useRef<number | null>(null);
+  const visible = useRef(true);
+  const onScreen = useRef(true);
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
-  // Interval refs to avoid stale closures + guarantee cleanup
-  const desktopTimer = useRef<number | null>(null);
-  const mobileTimer = useRef<number | null>(null);
-  const isPageVisible = useRef<boolean>(true);
-
-  // --- Utilities
-  const safeJoin = (base: string, path?: string) => {
-    if (!path) return "";
-    if (!base) return path;
-    return path.startsWith("http")
-      ? path
-      : `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+  const clear = () => {
+    if (timer.current) window.clearInterval(timer.current);
+    timer.current = null;
   };
 
-  const toKebab = (s: string) => s.toLowerCase().trim().replace(/\s+/g, "-");
+  useEffect(() => {
+    const onVis = () => {
+      visible.current = document.visibilityState === "visible";
+    };
+    document.addEventListener("visibilitychange", onVis, { passive: true });
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
-  // --- Hero images fetch (abortable + batched state)
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        onScreen.current = entries[0]?.isIntersecting ?? true;
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(rootRef.current);
+    return () => observer.disconnect();
+  }, [rootRef]);
+
+  useEffect(() => {
+    clear();
+    if (length <= 1 || reduceMotion) return;
+
+    timer.current = window.setInterval(() => {
+      if (!visible.current || !onScreen.current) return;
+      setIndex((i) => ((i + 1) % (length || 1)) as number);
+    }, delayMs);
+
+    return clear;
+  }, [length, delayMs, reduceMotion]);
+
+  return [index, setIndex] as const;
+}
+
+/* --------------------------- memo children --------------------------- */
+const ContactItem: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  value: string;
+  href: string;
+  color: string;
+}> = React.memo(({ icon, title, value, href, color }) => (
+  <a
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="group flex flex-col items-center sm:items-start transition-all duration-300"
+  >
+    <div className="flex items-center gap-4">
+      {icon}
+      <div>
+        <h3 className="text-[28px]" style={{ color }}>
+          {title}
+        </h3>
+        <p className="text-[16px]" style={{ color }}>
+          {value}
+        </p>
+      </div>
+    </div>
+    <div
+      className="mt-2 w-0 group-hover:w-24 h-[2px] transition-all duration-300"
+      style={{ backgroundColor: color }}
+    />
+  </a>
+));
+
+const CategoryCard: React.FC<{ category: Category; apiBase: string }> =
+  React.memo(({ category, apiBase }) => {
+    const href = `/home/${toKebab(category.name)}`;
+    const imgSrc = safeJoin(apiBase, category.image) || "/images/img1.jpg";
+    return (
+      <Link href={href} passHref>
+        <div className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform duration-300">
+          <Image
+            src={imgSrc}
+            alt={category.name}
+            width={640}
+            height={480}
+            className="w-full h-auto object-cover rounded-lg"
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 25vw, 320px"
+            // Next/Image doesn't let us easily change src in onError reliably across versions.
+            // We rely on server-provided URLs; if broken, Next shows a broken icon.
+            // Optional: add blurDataURL + placeholder="blur" if you have tiny thumbs.
+          />
+          <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
+            {category.name}
+          </h3>
+        </div>
+      </Link>
+    );
+  });
+
+/* ------------------------------ page -------------------------------- */
+export default function PrintingServicePage() {
+  const [desktopImages, setDesktopImages] = useState<string[]>([FALLBACK_IMG]);
+  const [mobileImages, setMobileImages] = useState<string[]>([FALLBACK_IMG]);
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // hero container refs for slider pause when off-screen
+  const desktopHeroRef = useRef<HTMLDivElement | null>(null);
+  const mobileHeroRef = useRef<HTMLDivElement | null>(null);
+
+  const [desktopIndex, setDesktopIndex] = useAutoSlider(
+    desktopImages.length,
+    4000,
+    desktopHeroRef
+  );
+  const [mobileIndex, setMobileIndex] = useAutoSlider(
+    mobileImages.length,
+    4000,
+    mobileHeroRef
+  );
+
+  // Fetch hero images
   useEffect(() => {
     const ac = new AbortController();
-
     (async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/hero-banner/`, {
@@ -100,64 +221,51 @@ export default function PrintingServicePage() {
           signal: ac.signal,
           cache: "no-store",
         });
-        if (!res.ok) throw new Error(`Hero fetch failed: ${res.status}`);
+        if (!res.ok) throw new Error(String(res.status));
         const data = await res.json();
-
         const all = Array.isArray(data?.images) ? data.images : [];
         const desktop = all
-          .filter((img: any) => img?.device_type === "desktop")
-          .map((img: any) => img?.url)
+          .filter((i: any) => i?.device_type === "desktop")
+          .map((i: any) => i?.url)
           .filter(Boolean);
         const mobile = all
-          .filter((img: any) => img?.device_type === "mobile")
-          .map((img: any) => img?.url)
+          .filter((i: any) => i?.device_type === "mobile")
+          .map((i: any) => i?.url)
           .filter(Boolean);
-
-        // Fallback split if device types aren’t set
         const mid = Math.ceil(all.length / 2);
-        const fallbackDesktop = all
-          .slice(0, mid)
-          .map((i: any) => i?.url)
-          .filter(Boolean);
-        const fallbackMobile = all
-          .slice(mid)
-          .map((i: any) => i?.url)
-          .filter(Boolean);
-
-        // Batch updates to avoid double render
         setDesktopImages(
           desktop.length
             ? desktop
-            : fallbackDesktop.length
-            ? fallbackDesktop
-            : [fallbackImage]
+            : all
+                .slice(0, mid)
+                .map((i: any) => i?.url)
+                .filter(Boolean) || [FALLBACK_IMG]
         );
         setMobileImages(
           mobile.length
             ? mobile
-            : fallbackMobile.length
-            ? fallbackMobile
-            : [fallbackImage]
+            : all
+                .slice(mid)
+                .map((i: any) => i?.url)
+                .filter(Boolean) || [FALLBACK_IMG]
         );
+      } catch (e) {
+        if ((e as any)?.name !== "AbortError") {
+          setDesktopImages([FALLBACK_IMG]);
+          setMobileImages([FALLBACK_IMG]);
+        }
+      } finally {
+        // reset indexes so Image 'priority' logic stays sane
         setDesktopIndex(0);
         setMobileIndex(0);
-      } catch (err) {
-        if ((err as any)?.name !== "AbortError") {
-          setDesktopImages([fallbackImage]);
-          setMobileImages([fallbackImage]);
-          setDesktopIndex(0);
-          setMobileIndex(0);
-        }
       }
     })();
-
     return () => ac.abort();
-  }, [API_BASE_URL]); // stable in your project, but explicit
+  }, [setDesktopIndex, setMobileIndex]);
 
-  // --- Categories fetch (abortable + filtering)
+  // Fetch categories
   useEffect(() => {
     const ac = new AbortController();
-
     (async () => {
       try {
         const res = await fetch(`${API_BASE_URL}/api/show-categories/`, {
@@ -165,63 +273,20 @@ export default function PrintingServicePage() {
           signal: ac.signal,
           cache: "no-store",
         });
-        if (!res.ok) throw new Error(`Categories fetch failed: ${res.status}`);
+        if (!res.ok) throw new Error(String(res.status));
         const data: Category[] = await res.json();
-        const visible = (Array.isArray(data) ? data : []).filter(
-          (c) => c?.status === "visible"
+        setCategories(
+          (Array.isArray(data) ? data : []).filter(
+            (c) => c?.status === "visible"
+          )
         );
-        setCategories(visible);
       } catch {
-        // Soft-fail; keep empty
+        /* silent fail */
       }
     })();
-
     return () => ac.abort();
-  }, [API_BASE_URL]);
-
-  // --- Handle page visibility (pause timers to save CPU)
-  useEffect(() => {
-    const onVisibility = () => {
-      isPageVisible.current = document.visibilityState === "visible";
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  // --- Sliders (use single source of truth per list; auto-pause when hidden)
-  const startDesktopSlider = useCallback(() => {
-    if (desktopTimer.current) window.clearInterval(desktopTimer.current);
-    if (desktopImages.length <= 1) return;
-    desktopTimer.current = window.setInterval(() => {
-      if (!isPageVisible.current) return;
-      setDesktopIndex((prev) => (prev + 1) % desktopImages.length);
-    }, 4000);
-  }, [desktopImages.length]);
-
-  const startMobileSlider = useCallback(() => {
-    if (mobileTimer.current) window.clearInterval(mobileTimer.current);
-    if (mobileImages.length <= 1) return;
-    mobileTimer.current = window.setInterval(() => {
-      if (!isPageVisible.current) return;
-      setMobileIndex((prev) => (prev + 1) % mobileImages.length);
-    }, 4000);
-  }, [mobileImages.length]);
-
-  useEffect(() => {
-    startDesktopSlider();
-    return () => {
-      if (desktopTimer.current) window.clearInterval(desktopTimer.current);
-    };
-  }, [startDesktopSlider]);
-
-  useEffect(() => {
-    startMobileSlider();
-    return () => {
-      if (mobileTimer.current) window.clearInterval(mobileTimer.current);
-    };
-  }, [startMobileSlider]);
-
-  // --- Static memo (no re-renders)
   const contactItems = useMemo(
     () => [
       {
@@ -256,25 +321,30 @@ export default function PrintingServicePage() {
     []
   );
 
-  // --- CTA form
+  // Toast on-demand import (JS only; CSS is already at top)
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const handleSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setIsSubmitted(true);
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      setIsSubmitted(true);
 
-    Toastify({
-      text: "We'll Call you back soon",
-      duration: 3000,
-      gravity: "top",
-      position: "right",
-      backgroundColor: "linear-gradient(to right, #00b09b, #96c93d)",
-    }).showToast();
+      const { default: Toastify } = await import("toastify-js");
 
-    e.currentTarget.reset();
-    window.setTimeout(() => setIsSubmitted(false), 4000);
-  }, []);
+      Toastify({
+        text: "We'll Call you back soon",
+        duration: 3000,
+        gravity: "top",
+        position: "right",
+        backgroundColor: "linear-gradient(to right, #00b09b, #96c93d)",
+      }).showToast();
 
-  // --- Render
+      e.currentTarget.reset();
+      window.setTimeout(() => setIsSubmitted(false), 4000);
+    },
+    []
+  );
+
+  /* -------------------------------- UI ------------------------------- */
   return (
     <div className="flex flex-col bg-white">
       <Header />
@@ -282,25 +352,31 @@ export default function PrintingServicePage() {
       <Navbar />
       <MobileTopBar />
 
-      {/* Hero Images */}
-      <img
-        loading="eager"
-        width={1440}
-        height={400}
-        src={desktopImages[desktopIndex] || fallbackImage}
-        alt="Hero Desktop"
-        className="hidden sm:block w-full h-auto mx-auto"
-      />
-      <img
-        loading="lazy"
-        width={768}
-        height={300}
-        src={mobileImages[mobileIndex] || fallbackImage}
-        alt="Hero Mobile"
-        className="block sm:hidden w-full h-auto object-cover mx-auto"
-      />
+      {/* Hero Images (desktop) */}
+      <div ref={desktopHeroRef}>
+        <Image
+          src={desktopImages[desktopIndex] || FALLBACK_IMG}
+          alt="Hero Desktop"
+          width={1440}
+          height={400}
+          className="hidden sm:block w-full h-auto mx-auto"
+          priority
+          sizes="100vw"
+        />
+      </div>
 
-      {/* Carousels with real Suspense fallbacks */}
+      {/* Hero Images (mobile) */}
+      <div ref={mobileHeroRef}>
+        <Image
+          src={mobileImages[mobileIndex] || FALLBACK_IMG}
+          alt="Hero Mobile"
+          width={768}
+          height={300}
+          className="block sm:hidden w-full h-auto object-cover mx-auto"
+          sizes="100vw"
+        />
+      </div>
+
       <Suspense
         fallback={
           <div className="h-[220px] sm:h-[280px] w-full animate-pulse bg-gray-100" />
@@ -309,11 +385,13 @@ export default function PrintingServicePage() {
         <Carousel />
       </Suspense>
 
-      <img
-        height={250}
+      <Image
         src="/images/Banner3.jpg"
         alt="Banner Image"
+        width={1920}
+        height={250}
         className="block bg-[#D9D9D9] w-full h-auto mx-auto"
+        sizes="100vw"
       />
 
       {/* Categories */}
@@ -324,46 +402,25 @@ export default function PrintingServicePage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
           {categories.length === 0
-            ? // Lightweight skeleton
-              Array.from({ length: 8 }).map((_, i) => (
+            ? Array.from({ length: 8 }).map((_, i) => (
                 <div key={i} className="flex flex-col items-center">
                   <div className="w-full aspect-[4/3] rounded-lg bg-gray-100 animate-pulse" />
                   <div className="mt-2 h-4 w-24 bg-gray-100 rounded animate-pulse" />
                 </div>
               ))
-            : categories.map((category) => {
-                const href = `/home/${toKebab(category.name)}`;
-                const imgSrc =
-                  safeJoin(API_BASE_URL, category.image) || "/images/img1.jpg";
-
-                return (
-                  <Link key={category.id} href={href} passHref>
-                    <div className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform duration-300">
-                      <img
-                        src={imgSrc}
-                        alt={category.name}
-                        className="w-full h-auto object-cover rounded-lg"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).src =
-                            "/images/img1.jpg";
-                        }}
-                        loading="lazy"
-                      />
-                      <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
-                        {category.name}
-                      </h3>
-                    </div>
-                  </Link>
-                );
-              })}
+            : categories.map((c) => (
+                <CategoryCard key={c.id} category={c} apiBase={API_BASE_URL} />
+              ))}
         </div>
       </div>
 
-      <img
-        height={250}
+      <Image
         src="/images/Banner2.jpg"
         alt="Banner Image"
+        width={1920}
+        height={250}
         className="block bg-[#D9D9D9] w-full h-auto"
+        sizes="100vw"
       />
 
       <Suspense
@@ -397,7 +454,6 @@ export default function PrintingServicePage() {
             Imperdiet nascetur consequat.
           </p>
 
-          {/* Callback Form */}
           <form
             onSubmit={handleSubmit}
             className="mt-10 space-y-6 max-w-md"
@@ -477,30 +533,15 @@ export default function PrintingServicePage() {
       {/* Contact Info */}
       <section className="bg-[#FAFAFA] px-4 sm:px-6 lg:px-24 py-8">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {contactItems.map((item, index) => (
-            <a
-              key={index}
-              href={item.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex flex-col items-center sm:items-start transition-all duration-300"
-            >
-              <div className="flex items-center gap-4">
-                {item.icon}
-                <div>
-                  <h3 className="text-[28px]" style={{ color: item.color }}>
-                    {item.title}
-                  </h3>
-                  <p className="text-[16px]" style={{ color: item.color }}>
-                    {item.value}
-                  </p>
-                </div>
-              </div>
-              <div
-                className="mt-2 w-0 group-hover:w-24 h-[2px] transition-all duration-300"
-                style={{ backgroundColor: item.color }}
-              />
-            </a>
+          {contactItems.map((it, idx) => (
+            <ContactItem
+              key={idx}
+              icon={it.icon}
+              title={it.title}
+              value={it.value}
+              href={it.href}
+              color={it.color}
+            />
           ))}
         </div>
       </section>
