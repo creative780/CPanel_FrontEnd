@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useState, useEffect, lazy, Suspense } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  Suspense,
+  useCallback,
+} from "react";
 import "toastify-js/src/toastify.css";
 import Navbar from "../components/Navbar";
 import Header from "../components/header";
@@ -17,122 +24,241 @@ import {
 import Toastify from "toastify-js";
 import { API_BASE_URL } from "../utils/api";
 import { ChatBot } from "../components/ChatBot";
+import dynamic from "next/dynamic";
 
 // 🔐 Frontend key helper (adds X-Frontend-Key to requests)
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
-  headers.set("X-Frontend-Key", FRONTEND_KEY);
+  if (FRONTEND_KEY) headers.set("X-Frontend-Key", FRONTEND_KEY);
   return { ...init, headers };
 };
 
-// Lazy-loaded heavy sections
-const Carousel = lazy(() => import("../components/Carousel"));
-const Reviews = lazy(() => import("../components/reviews"));
-const SecondCarousel = lazy(() => import("../components/second_carousel"));
+// ✂️ Code-split heavy sections with proper Suspense fallbacks
+const Carousel = dynamic(() => import("../components/Carousel"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[220px] sm:h-[280px] w-full animate-pulse bg-gray-100" />
+  ),
+});
+const Reviews = dynamic(() => import("../components/reviews"), {
+  ssr: false,
+  loading: () => <div className="h-[320px] w-full animate-pulse bg-gray-100" />,
+});
+const SecondCarousel = dynamic(() => import("../components/second_carousel"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
+  ),
+});
+
+// Types
+type Category = {
+  id: number | string;
+  name: string;
+  image?: string;
+  status?: "visible" | "hidden";
+};
 
 export default function PrintingServicePage() {
   const fallbackImage =
     "https://storage.googleapis.com/tagjs-prod.appspot.com/v1/ZfQW3qI2ok/ymeg8jht_expires_30_days.png";
 
+  // Hero state
   const [desktopImages, setDesktopImages] = useState<string[]>([fallbackImage]);
   const [mobileImages, setMobileImages] = useState<string[]>([fallbackImage]);
   const [desktopIndex, setDesktopIndex] = useState(0);
   const [mobileIndex, setMobileIndex] = useState(0);
-  const [categories, setCategories] = useState([]);
 
+  // Data state
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // Interval refs to avoid stale closures + guarantee cleanup
+  const desktopTimer = useRef<number | null>(null);
+  const mobileTimer = useRef<number | null>(null);
+  const isPageVisible = useRef<boolean>(true);
+
+  // --- Utilities
+  const safeJoin = (base: string, path?: string) => {
+    if (!path) return "";
+    if (!base) return path;
+    return path.startsWith("http")
+      ? path
+      : `${base}${path.startsWith("/") ? "" : "/"}${path}`;
+  };
+
+  const toKebab = (s: string) => s.toLowerCase().trim().replace(/\s+/g, "-");
+
+  // --- Hero images fetch (abortable + batched state)
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/hero-banner/`, withFrontendKey())
-      .then((res) => res.json())
-      .then((data) => {
-        const all = data?.images || [];
+    const ac = new AbortController();
 
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/hero-banner/`, {
+          ...withFrontendKey(),
+          signal: ac.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`Hero fetch failed: ${res.status}`);
+        const data = await res.json();
+
+        const all = Array.isArray(data?.images) ? data.images : [];
         const desktop = all
-          .filter((img: any) => img.device_type === "desktop")
-          .map((img: any) => img.url);
-
+          .filter((img: any) => img?.device_type === "desktop")
+          .map((img: any) => img?.url)
+          .filter(Boolean);
         const mobile = all
-          .filter((img: any) => img.device_type === "mobile")
-          .map((img: any) => img.url);
+          .filter((img: any) => img?.device_type === "mobile")
+          .map((img: any) => img?.url)
+          .filter(Boolean);
 
+        // Fallback split if device types aren’t set
         const mid = Math.ceil(all.length / 2);
+        const fallbackDesktop = all
+          .slice(0, mid)
+          .map((i: any) => i?.url)
+          .filter(Boolean);
+        const fallbackMobile = all
+          .slice(mid)
+          .map((i: any) => i?.url)
+          .filter(Boolean);
 
+        // Batch updates to avoid double render
         setDesktopImages(
           desktop.length
             ? desktop
-            : all.slice(0, mid).map((img: any) => img.url) || [fallbackImage]
+            : fallbackDesktop.length
+            ? fallbackDesktop
+            : [fallbackImage]
         );
         setMobileImages(
           mobile.length
             ? mobile
-            : all.slice(mid).map((img: any) => img.url) || [fallbackImage]
+            : fallbackMobile.length
+            ? fallbackMobile
+            : [fallbackImage]
         );
-      })
-      .catch(() => {
-        setDesktopImages([fallbackImage]);
-        setMobileImages([fallbackImage]);
-      });
-  }, []);
+        setDesktopIndex(0);
+        setMobileIndex(0);
+      } catch (err) {
+        if ((err as any)?.name !== "AbortError") {
+          setDesktopImages([fallbackImage]);
+          setMobileImages([fallbackImage]);
+          setDesktopIndex(0);
+          setMobileIndex(0);
+        }
+      }
+    })();
 
+    return () => ac.abort();
+  }, [API_BASE_URL]); // stable in your project, but explicit
+
+  // --- Categories fetch (abortable + filtering)
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey())
-      .then((res) => res.json())
-      .then((data) => {
-        const visible = data.filter(
-          (category) => category.status === "visible"
+    const ac = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/show-categories/`, {
+          ...withFrontendKey(),
+          signal: ac.signal,
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`Categories fetch failed: ${res.status}`);
+        const data: Category[] = await res.json();
+        const visible = (Array.isArray(data) ? data : []).filter(
+          (c) => c?.status === "visible"
         );
         setCategories(visible);
-      })
-      .catch((err) => console.error("Error fetching categories:", err));
+      } catch {
+        // Soft-fail; keep empty
+      }
+    })();
+
+    return () => ac.abort();
+  }, [API_BASE_URL]);
+
+  // --- Handle page visibility (pause timers to save CPU)
+  useEffect(() => {
+    const onVisibility = () => {
+      isPageVisible.current = document.visibilityState === "visible";
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  // --- Sliders (use single source of truth per list; auto-pause when hidden)
+  const startDesktopSlider = useCallback(() => {
+    if (desktopTimer.current) window.clearInterval(desktopTimer.current);
+    if (desktopImages.length <= 1) return;
+    desktopTimer.current = window.setInterval(() => {
+      if (!isPageVisible.current) return;
       setDesktopIndex((prev) => (prev + 1) % desktopImages.length);
     }, 4000);
-    return () => clearInterval(interval);
-  }, [desktopImages]);
+  }, [desktopImages.length]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
+  const startMobileSlider = useCallback(() => {
+    if (mobileTimer.current) window.clearInterval(mobileTimer.current);
+    if (mobileImages.length <= 1) return;
+    mobileTimer.current = window.setInterval(() => {
+      if (!isPageVisible.current) return;
       setMobileIndex((prev) => (prev + 1) % mobileImages.length);
     }, 4000);
-    return () => clearInterval(interval);
-  }, [mobileImages]);
+  }, [mobileImages.length]);
 
-  const contactItems = [
-    {
-      icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
-      title: "Whatsapp",
-      value: "+971 50 279 3948",
-      href: "https://wa.me/971502793948",
-      color: "#014C3D",
-    },
-    {
-      icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
-      title: "Call",
-      value: "+971 54 539 6249",
-      href: "tel:+971545396249",
-      color: "#00B7FF",
-    },
-    {
-      icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
-      title: "Find Us",
-      value: "Naif – Deira – Dubai",
-      href: "https://maps.google.com/?q=Naif+Deira+Dubai",
-      color: "#891F1A",
-    },
-    {
-      icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
-      title: "Email",
-      value: "ccaddxb@gmail.com",
-      href: "mailto:ccaddxb@gmail.com",
-      color: "#E6492D",
-    },
-  ];
+  useEffect(() => {
+    startDesktopSlider();
+    return () => {
+      if (desktopTimer.current) window.clearInterval(desktopTimer.current);
+    };
+  }, [startDesktopSlider]);
 
+  useEffect(() => {
+    startMobileSlider();
+    return () => {
+      if (mobileTimer.current) window.clearInterval(mobileTimer.current);
+    };
+  }, [startMobileSlider]);
+
+  // --- Static memo (no re-renders)
+  const contactItems = useMemo(
+    () => [
+      {
+        icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
+        title: "Whatsapp",
+        value: "+971 50 279 3948",
+        href: "https://wa.me/971502793948",
+        color: "#014C3D",
+      },
+      {
+        icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
+        title: "Call",
+        value: "+971 54 539 6249",
+        href: "tel:+971545396249",
+        color: "#00B7FF",
+      },
+      {
+        icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
+        title: "Find Us",
+        value: "Naif – Deira – Dubai",
+        href: "https://maps.google.com/?q=Naif+Deira+Dubai",
+        color: "#891F1A",
+      },
+      {
+        icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
+        title: "Email",
+        value: "ccaddxb@gmail.com",
+        href: "mailto:ccaddxb@gmail.com",
+        color: "#E6492D",
+      },
+    ],
+    []
+  );
+
+  // --- CTA form
   const [isSubmitted, setIsSubmitted] = useState(false);
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsSubmitted(true);
 
@@ -145,9 +271,10 @@ export default function PrintingServicePage() {
     }).showToast();
 
     e.currentTarget.reset();
-    setTimeout(() => setIsSubmitted(false), 4000);
-  };
+    window.setTimeout(() => setIsSubmitted(false), 4000);
+  }, []);
 
+  // --- Render
   return (
     <div className="flex flex-col bg-white">
       <Header />
@@ -157,69 +284,103 @@ export default function PrintingServicePage() {
 
       {/* Hero Images */}
       <img
-        loading="lazy"
-        width="1440"
-        height="400"
-        src={desktopImages[desktopIndex]}
+        loading="eager"
+        width={1440}
+        height={400}
+        src={desktopImages[desktopIndex] || fallbackImage}
         alt="Hero Desktop"
         className="hidden sm:block w-full h-auto mx-auto"
       />
       <img
         loading="lazy"
-        width="768"
-        height="300"
-        src={mobileImages[mobileIndex]}
+        width={768}
+        height={300}
+        src={mobileImages[mobileIndex] || fallbackImage}
         alt="Hero Mobile"
         className="block sm:hidden w-full h-auto object-cover mx-auto"
       />
 
-      <Carousel />
+      {/* Carousels with real Suspense fallbacks */}
+      <Suspense
+        fallback={
+          <div className="h-[220px] sm:h-[280px] w-full animate-pulse bg-gray-100" />
+        }
+      >
+        <Carousel />
+      </Suspense>
+
       <img
-        height="250"
+        height={250}
         src="/images/Banner3.jpg"
         alt="Banner Image"
         className="block bg-[#D9D9D9] w-full h-auto mx-auto"
       />
+
+      {/* Categories */}
       <div className="px-4 sm:px-6 lg:px-24 py-8">
         <h2 className="text-[#891F1A] text-2xl sm:text-3xl font-bold text-center mb-6">
           Discover our categories
         </h2>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-          {categories.map((category) => {
-            const formattedUrl = `/home/${category.name
-              .toLowerCase()
-              .replace(/\s+/g, "-")}`;
-
-            return (
-              <Link key={category.id} href={formattedUrl} passHref>
-                <div className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform duration-300">
-                  <img
-                    src={`${API_BASE_URL}${category.image}`}
-                    alt={category.name}
-                    className="w-full h-auto object-cover rounded-lg"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/images/img1.jpg";
-                    }}
-                  />
-                  <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
-                    {category.name}
-                  </h3>
+          {categories.length === 0
+            ? // Lightweight skeleton
+              Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex flex-col items-center">
+                  <div className="w-full aspect-[4/3] rounded-lg bg-gray-100 animate-pulse" />
+                  <div className="mt-2 h-4 w-24 bg-gray-100 rounded animate-pulse" />
                 </div>
-              </Link>
-            );
-          })}
+              ))
+            : categories.map((category) => {
+                const href = `/home/${toKebab(category.name)}`;
+                const imgSrc =
+                  safeJoin(API_BASE_URL, category.image) || "/images/img1.jpg";
+
+                return (
+                  <Link key={category.id} href={href} passHref>
+                    <div className="flex flex-col items-center cursor-pointer hover:scale-105 transition-transform duration-300">
+                      <img
+                        src={imgSrc}
+                        alt={category.name}
+                        className="w-full h-auto object-cover rounded-lg"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src =
+                            "/images/img1.jpg";
+                        }}
+                        loading="lazy"
+                      />
+                      <h3 className="mt-2 text-md font-semibold text-[#333] text-center">
+                        {category.name}
+                      </h3>
+                    </div>
+                  </Link>
+                );
+              })}
         </div>
       </div>
 
       <img
-        height="250"
+        height={250}
         src="/images/Banner2.jpg"
         alt="Banner Image"
-        className="block bg-[#D9D9D9]  w-full h-auto"
+        className="block bg-[#D9D9D9] w-full h-auto"
       />
-      <SecondCarousel />
-      <Reviews />
+
+      <Suspense
+        fallback={
+          <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
+        }
+      >
+        <SecondCarousel />
+      </Suspense>
+
+      <Suspense
+        fallback={
+          <div className="h-[320px] w-full animate-pulse bg-gray-100" />
+        }
+      >
+        <Reviews />
+      </Suspense>
 
       {/* CTA */}
       <section className="flex flex-col lg:flex-row gap-8 items-center px-4 sm:px-6 lg:px-24 py-12 bg-white">
@@ -237,7 +398,11 @@ export default function PrintingServicePage() {
           </p>
 
           {/* Callback Form */}
-          <form onSubmit={handleSubmit} className="mt-10 space-y-6 max-w-md">
+          <form
+            onSubmit={handleSubmit}
+            className="mt-10 space-y-6 max-w-md"
+            noValidate
+          >
             <div>
               <label
                 htmlFor="name"
@@ -252,6 +417,7 @@ export default function PrintingServicePage() {
                 required
                 placeholder="Enter your full name"
                 className="w-full border border-gray-300 rounded-md p-3 text-gray-700 bg-white"
+                autoComplete="name"
               />
             </div>
 
@@ -269,6 +435,8 @@ export default function PrintingServicePage() {
                 required
                 placeholder="e.g. +971-50-123-4567"
                 className="w-full border border-gray-300 rounded-md p-3 text-gray-700 bg-white"
+                autoComplete="tel"
+                inputMode="tel"
               />
             </div>
 
@@ -293,8 +461,9 @@ export default function PrintingServicePage() {
               <button
                 type="submit"
                 className="bg-[#891F1A] text-white px-8 py-3 rounded-md hover:bg-[#6f1814] transition"
+                disabled={isSubmitted}
               >
-                Send Request
+                {isSubmitted ? "Sending..." : "Send Request"}
               </button>
             </div>
           </form>
@@ -302,7 +471,8 @@ export default function PrintingServicePage() {
 
         <div className="w-full mr-[10px] sm:w-[500px] h-[600px] bg-[#8B8491] rounded-xl" />
       </section>
-      <div className="w-full bg-white h-[100px]"></div>
+
+      <div className="w-full bg-white h-[100px]" />
 
       {/* Contact Info */}
       <section className="bg-[#FAFAFA] px-4 sm:px-6 lg:px-24 py-8">
