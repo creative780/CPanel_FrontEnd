@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import "toastify-js/src/toastify.css";
 import dynamic from "next/dynamic";
+import Head from "next/head";
 import Image from "next/image";
 import Navbar from "../components/Navbar";
 import Header from "../components/header";
@@ -54,6 +55,7 @@ const ChatBot = dynamic(
   { ssr: false, loading: () => null }
 );
 const Footer = dynamic(() => import("../components/Footer"), {
+  ssr: false,
   loading: () => <div className="h-24 w-full bg-gray-100 animate-pulse" />,
 });
 
@@ -76,9 +78,10 @@ const safeJoin = (base: string, path?: string) => {
 };
 const toKebab = (s: string) => s.toLowerCase().trim().replace(/\s+/g, "-");
 
-/* --------------------------- intersection hook -------------------------- */
-function useInView<T extends Element>(opts?: IntersectionObserverInit) {
-  const ref = useRef<T | null>(null);
+/* --------------------------- intersection utils ------------------------- */
+// Single hook factory so we don't spin up extra observers unnecessarily.
+function useInView(rootMargin = "200px 0px", threshold = 0.01) {
+  const ref = useRef<Element | null>(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
     if (!ref.current) return;
@@ -89,11 +92,11 @@ function useInView<T extends Element>(opts?: IntersectionObserverInit) {
           io.disconnect();
         }
       },
-      { rootMargin: "200px 0px", threshold: 0.01, ...opts }
+      { rootMargin, threshold }
     );
     io.observe(ref.current);
     return () => io.disconnect();
-  }, []);
+  }, [rootMargin, threshold]);
   return { ref, inView } as const;
 }
 
@@ -188,7 +191,7 @@ const CategoryCard: React.FC<{ category: Category; apiBase: string }> = memo(
     const href = `/home/${toKebab(category.name)}`;
     const imgSrc = safeJoin(apiBase, category.image) || "/images/img1.jpg";
     return (
-      <Link href={href} passHref>
+      <Link href={href} passHref prefetch={false}>
         <div className="flex flex-col items-center cursor-pointer sm:hover:scale-105 sm:transition-transform sm:duration-300">
           <Image
             src={imgSrc}
@@ -208,13 +211,45 @@ const CategoryCard: React.FC<{ category: Category; apiBase: string }> = memo(
   }
 );
 
+/* --------------------------- static contact data ------------------------ */
+const CONTACT_ITEMS = [
+  {
+    icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
+    title: "Whatsapp",
+    value: "+971 50 279 3948",
+    href: "https://wa.me/971502793948",
+    color: "#014C3D",
+  },
+  {
+    icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
+    title: "Call",
+    value: "+971 54 539 6249",
+    href: "tel:+971545396249",
+    color: "#00B7FF",
+  },
+  {
+    icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
+    title: "Find Us",
+    value: "Naif – Deira – Dubai",
+    href: "https://maps.google.com/?q=Naif+Deira+Dubai",
+    color: "#891F1A",
+  },
+  {
+    icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
+    title: "Email",
+    value: "ccaddxb@gmail.com",
+    href: "mailto:ccaddxb@gmail.com",
+    color: "#E6492D",
+  },
+] as const;
+
 /* --------------------------------- page -------------------------------- */
 export default function PrintingServicePage() {
   const [desktopImages, setDesktopImages] = useState<string[]>([FALLBACK_IMG]);
   const [mobileImages, setMobileImages] = useState<string[]>([FALLBACK_IMG]);
   const [categories, setCategories] = useState<Category[]>([]);
 
-  // media query: only mount heavy stuff on ≥sm
+  // media query: heavy stuff only on ≥sm
   const [isDesktop, setIsDesktop] = useState(false);
   useEffect(() => {
     const q = window.matchMedia("(min-width: 640px)");
@@ -238,11 +273,19 @@ export default function PrintingServicePage() {
     mobileHeroRef
   );
 
-  // lazy mount sentinels
-  const firstCarouselSentinel = useInView<HTMLDivElement>();
-  const secondCarouselSentinel = useInView<HTMLDivElement>();
-  const reviewsSentinel = useInView<HTMLDivElement>();
-  const chatBotSentinel = useInView<HTMLDivElement>();
+  // in-view sentinels (reuse single hook pattern)
+  const firstCarouselSentinel = useInView();
+  const secondCarouselSentinel = useInView();
+  const reviewsSentinel = useInView();
+  const chatBotSentinel = useInView();
+
+  // idle flags (mount only when the main thread is free)
+  const [idleReady, setIdleReady] = useState(false);
+  useEffect(() => {
+    const cb = () => setIdleReady(true);
+    // @ts-ignore
+    (window.requestIdleCallback || window.setTimeout)(cb, { timeout: 2200 });
+  }, []);
 
   /* ----------------------------- fetch hero ---------------------------- */
   useEffect(() => {
@@ -303,7 +346,7 @@ export default function PrintingServicePage() {
         const res = await fetch(`${API_BASE_URL}/api/show-categories/`, {
           ...withFrontendKey(),
           signal: ac.signal,
-          cache: "force-cache", // allow caching on mobile
+          cache: "force-cache", // better for phones
         });
         if (!res.ok) throw new Error(String(res.status));
         const data: Category[] = await res.json();
@@ -318,38 +361,6 @@ export default function PrintingServicePage() {
     })();
     return () => ac.abort();
   }, []);
-
-  /* ------------------------------- contact ------------------------------ */
-  const contactItems = [
-    {
-      icon: <FaWhatsapp className="text-[#014C3D] text-[44px]" />,
-      title: "Whatsapp",
-      value: "+971 50 279 3948",
-      href: "https://wa.me/971502793948",
-      color: "#014C3D",
-    },
-    {
-      icon: <FaPhoneAlt className="text-[#00B7FF] text-[44px]" />,
-      title: "Call",
-      value: "+971 54 539 6249",
-      href: "tel:+971545396249",
-      color: "#00B7FF",
-    },
-    {
-      icon: <FaMapMarkerAlt className="text-[#891F1A] text-[44px]" />,
-      title: "Find Us",
-      value: "Naif – Deira – Dubai",
-      href: "https://maps.google.com/?q=Naif+Deira+Dubai",
-      color: "#891F1A",
-    },
-    {
-      icon: <FaEnvelopeOpenText className="text-[#E6492D] text-[44px]" />,
-      title: "Email",
-      value: "ccaddxb@gmail.com",
-      href: "mailto:ccaddxb@gmail.com",
-      color: "#E6492D",
-    },
-  ] as const;
 
   /* ------------------------------ toast/form ---------------------------- */
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -374,6 +385,12 @@ export default function PrintingServicePage() {
   /* --------------------------------- UI --------------------------------- */
   return (
     <div className="flex flex-col bg-white">
+      {/* network hints (cheaper TTFB for API/images on mobile) */}
+      <Head>
+        <link rel="preconnect" href={API_BASE_URL} crossOrigin="" />
+        <link rel="dns-prefetch" href={API_BASE_URL} />
+      </Head>
+
       <Header />
       <LogoSection />
       <Navbar />
@@ -387,7 +404,7 @@ export default function PrintingServicePage() {
           width={1440}
           height={400}
           className="hidden sm:block w-full h-auto mx-auto"
-          priority={false} // desktop not LCP on phones
+          priority={false}
           sizes="100vw"
           decoding="async"
         />
@@ -402,13 +419,15 @@ export default function PrintingServicePage() {
           height={300}
           className="block sm:hidden w-full h-auto object-cover mx-auto"
           sizes="100vw"
-          priority // make mobile hero the LCP
+          priority
+          // @ts-ignore — next/image supports this prop in modern versions
+          fetchPriority="high"
         />
       </div>
 
-      {/* First Carousel - lazy mount when visible; keep skeleton until then */}
+      {/* First Carousel - lazy mount when visible */}
       <div
-        ref={firstCarouselSentinel.ref}
+        ref={firstCarouselSentinel.ref as any}
         style={{ contentVisibility: "auto", containIntrinsicSize: "280px" }}
       >
         <Suspense
@@ -431,6 +450,7 @@ export default function PrintingServicePage() {
         height={250}
         className="block bg-[#D9D9D9] w-full h-auto mx-auto"
         sizes="100vw"
+        loading="lazy"
         decoding="async"
       />
 
@@ -464,12 +484,13 @@ export default function PrintingServicePage() {
         height={250}
         className="block bg-[#D9D9D9] w-full h-auto"
         sizes="100vw"
+        loading="lazy"
         decoding="async"
       />
 
-      {/* Second Carousel (desktop only, and only when in view) */}
+      {/* Second Carousel (desktop only, in view, and after idle) */}
       <div
-        ref={secondCarouselSentinel.ref}
+        ref={secondCarouselSentinel.ref as any}
         style={{ contentVisibility: "auto", containIntrinsicSize: "260px" }}
       >
         <Suspense
@@ -477,17 +498,17 @@ export default function PrintingServicePage() {
             <div className="h-[200px] sm:h-[260px] w-full animate-pulse bg-gray-100" />
           }
         >
-          {isDesktop && secondCarouselSentinel.inView ? (
-            <SecondCarousel /* active */ />
+          {isDesktop && idleReady && secondCarouselSentinel.inView ? (
+            <SecondCarousel />
           ) : (
             <div className="h-[200px] sm:h-[260px] w-full bg-gray-100" />
           )}
         </Suspense>
       </div>
 
-      {/* Reviews (desktop only, and only when in view) */}
+      {/* Reviews (desktop only, in view, and after idle) */}
       <div
-        ref={reviewsSentinel.ref}
+        ref={reviewsSentinel.ref as any}
         style={{ contentVisibility: "auto", containIntrinsicSize: "320px" }}
       >
         <Suspense
@@ -495,8 +516,8 @@ export default function PrintingServicePage() {
             <div className="h-[320px] w-full animate-pulse bg-gray-100" />
           }
         >
-          {isDesktop && reviewsSentinel.inView ? (
-            <Reviews /* active */ />
+          {isDesktop && idleReady && reviewsSentinel.inView ? (
+            <Reviews />
           ) : (
             <div className="h-[320px] w-full bg-gray-100" />
           )}
@@ -592,11 +613,11 @@ export default function PrintingServicePage() {
           </form>
         </div>
 
-        {/* kill the gray brick on mobile; keep desktop visual */}
+        {/* gray brick hidden on mobile */}
         <div className="hidden lg:block w-[500px] h-[600px] bg-[#8B8491] rounded-xl" />
       </section>
 
-      <div className="w-full bg-white h-[80px]" />
+      <div className="w-full bg-white h-[72px]" />
 
       {/* Contact Info */}
       <section
@@ -604,7 +625,7 @@ export default function PrintingServicePage() {
         style={{ contentVisibility: "auto", containIntrinsicSize: "300px" }}
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {contactItems.map((it, idx) => (
+          {CONTACT_ITEMS.map((it, idx) => (
             <ContactItem
               key={idx}
               icon={it.icon}
@@ -617,11 +638,12 @@ export default function PrintingServicePage() {
         </div>
       </section>
 
-      <Footer />
+      {/* Footer waits for idle to avoid competing with LCP on phones */}
+      {idleReady ? <Footer /> : <div className="h-24 w-full bg-gray-100" />}
 
-      {/* Chatbot: desktop only, and only when near viewport */}
-      <div ref={chatBotSentinel.ref}>
-        {isDesktop && chatBotSentinel.inView && <ChatBot />}
+      {/* Chatbot: desktop only, in view, and idle */}
+      <div ref={chatBotSentinel.ref as any}>
+        {isDesktop && idleReady && chatBotSentinel.inView && <ChatBot />}
       </div>
     </div>
   );
