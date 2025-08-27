@@ -340,7 +340,10 @@ export default function ProductDetailPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+      >
         Loading...
       </div>
     );
@@ -348,7 +351,10 @@ export default function ProductDetailPage() {
 
   if (!product) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-red-500">
+      <div
+        className="min-h-screen flex items-center justify-center text-red-500"
+        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+      >
         Product not found.
       </div>
     );
@@ -364,7 +370,10 @@ export default function ProductDetailPage() {
         />
       </Head>
 
-      <div className="bg-white min-h-screen">
+      <div
+        className="bg-white min-h-screen"
+        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+      >
         <Header />
         <LogoSection />
         <MobileTopBar />
@@ -388,12 +397,14 @@ export default function ProductDetailPage() {
               <button
                 onClick={prevImage}
                 className="absolute left-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
+                aria-label="Previous image"
               >
                 <ChevronLeft />
               </button>
               <button
                 onClick={nextImage}
                 className="absolute right-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
+                aria-label="Next image"
               >
                 <ChevronRight />
               </button>
@@ -412,6 +423,7 @@ export default function ProductDetailPage() {
                       ? "ring-2 ring-red-700"
                       : "ring-1 ring-gray-300"
                   }`}
+                  aria-label={`Show image ${i + 1}`}
                 >
                   <img
                     src={img}
@@ -425,8 +437,15 @@ export default function ProductDetailPage() {
 
           {/* Info Section */}
           <div className="space-y-4">
+            {/* h1 → Bold (700) */}
             <h1 className="text-3xl font-bold text-gray-900">{product.name}</h1>
-            <p className="text-red-700 font-semibold text-2xl">AED: {product.price}</p>
+
+            {/* Price as paragraph with emphasized number → strong (700) */}
+            <p className="text-2xl text-red-700">
+              AED: <strong className="font-bold">{product.price}</strong>
+            </p>
+
+            {/* Stock status → p Regular (400) */}
             <p
               className={`text-sm ${
                 product.stock_status === "out of stock"
@@ -442,9 +461,10 @@ export default function ProductDetailPage() {
             {/* Sizes */}
             {product.sizes?.length > 0 && (
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-3">
+                {/* h3 → Medium (500) */}
+                <h3 className="text-sm font-medium text-gray-500 mb-3">
                   Select Size
-                </p>
+                </h3>
                 <div className="flex gap-2">
                   {product.sizes.map((s: string) => (
                     <button
@@ -466,9 +486,10 @@ export default function ProductDetailPage() {
             {/* Printing Methods */}
             {product.printing_methods?.length > 0 && (
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-3">
+                {/* h3 → Medium (500) */}
+                <h3 className="text-sm font-medium text-gray-500 mb-3">
                   Printing Methods
-                </p>
+                </h3>
                 <div className="flex gap-2 flex-wrap">
                   {product.printing_methods.map((pm: string, i: number) => {
                     let label = pm;
@@ -494,9 +515,10 @@ export default function ProductDetailPage() {
               <section className="space-y-6">
                 {customAttributes.map((attr) => (
                   <div key={attr.id} className="space-y-3">
-                    <p className="text-sm font-semibold text-gray-800">
+                    {/* h4 → Medium (500) */}
+                    <h4 className="text-sm font-medium text-gray-800">
                       {attr.name}
-                    </p>
+                    </h4>
                     <div className="flex flex-wrap gap-4">
                       {attr.options.map((opt) => {
                         const selected = isSelected(attr.id, opt.id);
@@ -506,9 +528,9 @@ export default function ProductDetailPage() {
 
                         return (
                           <div key={opt.id} className="relative">
-                            {/* Price delta badge: green for +, maroon for - , nothing for 0 */}
+                            {/* delta badge (not semantic text content) */}
                             {positive ? (
-                              <span className="absolute -top-2 -right-1 z-10 text-xs font-medium rounded-full px-2 py-1 bg-green-100 text-green-700 border border-green-200  w-full">
+                              <span className="absolute -top-2 -right-1 z-10 text-xs font-medium rounded-full px-2 py-1 bg-green-100 text-green-700 border border-green-200 w-full">
                                 +{Math.round(delta)} AED
                               </span>
                             ) : negative ? (
@@ -545,6 +567,7 @@ export default function ProductDetailPage() {
                                       fill="none"
                                       stroke="currentColor"
                                       viewBox="0 0 24 24"
+                                      aria-hidden="true"
                                     >
                                       <path
                                         strokeLinecap="round"
@@ -558,8 +581,9 @@ export default function ProductDetailPage() {
                               </div>
 
                               <div className="px-0.5 pb-1.5 relative">
+                                {/* option label → p Regular (400) */}
                                 <p
-                                  className={`text-xs font-medium ${
+                                  className={`text-xs font-normal ${
                                     selected ? "text-gray-900" : "text-gray-600"
                                   }`}
                                 >
@@ -574,6 +598,7 @@ export default function ProductDetailPage() {
                                         fill="none"
                                         stroke="currentColor"
                                         viewBox="0 0 24 24"
+                                        aria-hidden="true"
                                       >
                                         <path
                                           strokeLinecap="round"
@@ -599,6 +624,7 @@ export default function ProductDetailPage() {
 
             {/* Add to Cart */}
             <div className="flex gap-4 items-center">
+              {/* button → Medium (500) */}
               <button
                 onClick={handleAddToCart}
                 disabled={
@@ -619,11 +645,13 @@ export default function ProductDetailPage() {
             {/* Description */}
             <div className="border-t pt-4">
               <div className="flex justify-between items-center">
-                <span className="font-semibold text-lg text-black">
-                  Description & Fit
-                </span>
+                {/* h3 → Medium (500) */}
+                <h3 className="font-medium text-lg text-black">
+                  Description &amp; Fit
+                </h3>
                 <ChevronDown />
               </div>
+              {/* p → Regular (400) */}
               <p className="text-sm text-gray-600 mt-2">
                 {product.fit_description || "No description available."}
               </p>
@@ -632,17 +660,15 @@ export default function ProductDetailPage() {
             {/* Shipping */}
             <div className="border-t pt-4">
               <div className="flex justify-between items-center">
-                <span className="font-semibold text-lg text-black">
-                  Shipping
-                </span>
+                {/* h3 → Medium (500) */}
+                <h3 className="font-medium text-lg text-black">Shipping</h3>
                 <ChevronDown />
               </div>
               <div className="grid grid-cols-2 gap-4 mt-2 text-sm text-gray-700">
                 <div className="flex gap-2 items-center">
                   <Truck className="w-4 h-4" />
-                  <span>
-                    Within {shippingInfo.processing_time || "3–5"} days
-                  </span>
+                  {/* span inside paragraph context → Regular (400) */}
+                  <span>Within {shippingInfo.processing_time || "3–5"} days</span>
                 </div>
                 <div className="flex gap-2 items-center">
                   <Calendar className="w-4 h-4" />
@@ -655,7 +681,8 @@ export default function ProductDetailPage() {
 
         {/* Related */}
         <div className="max-w-6xl mx-auto mt-20 px-4 mb-20">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">
+          {/* h2 → Semi Bold (600) */}
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">
             You might also like
           </h2>
           {relatedProducts.length ? (
@@ -676,12 +703,14 @@ export default function ProductDetailPage() {
                     className="w-full h-60 object-cover"
                   />
                   <div className="p-4">
-                    <p className="font-medium text-gray-800 truncate">
+                    {/* product name → p Regular (400) with emphasis via font-medium if desired */}
+                    <p className="font-normal text-gray-800 truncate">
                       {item.name}
                     </p>
-                    <span className="text-sm font-semibold text-red-700">
-                      RS: {item.price}
-                    </span>
+                    {/* price emphasis → strong (700) */}
+                    <p className="text-sm text-red-700">
+                      RS: <strong className="font-bold">{item.price}</strong>
+                    </p>
                     {item.printing_methods?.length > 0 && (
                       <p className="text-xs text-gray-500 mt-1">
                         Print: {item.printing_methods.join(", ")}

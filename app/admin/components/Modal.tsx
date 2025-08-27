@@ -1,5 +1,5 @@
 'use client';
-// for admin modal component
+
 import { useEffect, useState } from 'react';
 
 interface ModalProps {

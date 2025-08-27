@@ -21,6 +21,7 @@ const labelToPath: Record<string, string> = {
   "Google Settings": "/admin/G-Settings",
   "Google Analytics": "/admin/G-Analytics",
   "New Account": "/admin/new-account",
+  "Navbar" : "/admin/navbar",
 };
 
 function normalize(p: string) {

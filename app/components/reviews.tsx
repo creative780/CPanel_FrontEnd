@@ -62,11 +62,17 @@ export default function CustomerReviews() {
   if (testimonials.length === 0) return null;
 
   return (
-    <section className="relative w-full py-20 bg-white overflow-hidden px-2 md:px-4">
-      <h2 className="text-4xl font-bold text-center text-[#891F1A] mb-3">
+    <section
+      style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
+      className="relative w-full py-20 bg-white overflow-hidden px-2 md:px-4"
+    >
+      {/* h2 → Semi Bold (600) */}
+      <h2 className="text-4xl font-semibold text-center text-[#891F1A] mb-3">
         What Our Customers Say
       </h2>
-      <p className="text-center text-gray-500 text-lg mb-12">
+
+      {/* p → Regular (400) */}
+      <p className="text-center text-gray-500 text-lg font-normal mb-12">
         Hear from our incredible customers who are building at lightning speed.
       </p>
 
@@ -83,7 +89,7 @@ export default function CustomerReviews() {
                 className="relative min-w-[300px] max-w-[300px] flex-shrink-0"
               >
                 <article className="relative bg-white border-[2px] border-[#891F1A] rounded-2xl shadow-md px-5 pt-16 pb-6 text-left flex flex-col gap-4 overflow-visible">
-                  <div className="absolute -top-10 w-16 h-16 rounded-full overflow-hidden shadow mt-5 border-[3px] border-[#891F1A] bg-white">
+                  <figure className="absolute -top-10 w-16 h-16 rounded-full overflow-hidden shadow mt-5 border-[3px] border-[#891F1A] bg-white">
                     <Image
                       src={t.image || "/default-avatar.jpg"}
                       alt={t.name || "Customer"}
@@ -91,33 +97,44 @@ export default function CustomerReviews() {
                       height={70}
                       className="object-cover w-full h-full"
                     />
-                  </div>
+                  </figure>
 
+                  {/* Stars */}
                   <div className="flex justify-end -mt-13">
                     {Array(t.rating || 5)
                       .fill(0)
                       .map((_, i) => (
-                        <span key={i} className="text-[#891F1A] text-xl">
+                        <span
+                          key={i}
+                          className="text-[#891F1A] text-xl font-medium"
+                        >
                           ★
                         </span>
                       ))}
                   </div>
 
-                  <p className="text-gray-800 text-[15px] leading-relaxed">
+                  {/* Review text → p (Regular 400) */}
+                  <p className="text-gray-800 text-[15px] leading-relaxed font-normal">
                     {t.content}
                   </p>
 
-                  <div>
+                  <footer>
+                    {/* Name → Bold (700) */}
                     <p className="font-bold text-[#891F1A] text-sm">{t.name}</p>
-                    <p className="text-gray-500 text-sm">{t.role}</p>
-                  </div>
+                    {/* Role → Light (300) */}
+                    <p className="text-gray-500 text-sm font-light">{t.role}</p>
+                  </footer>
                 </article>
               </div>
             ))}
           </div>
         </div>
 
-        <div className="flex justify-center gap-2 mt-6">
+        {/* Pagination dots */}
+        <nav
+          className="flex justify-center gap-2 mt-6"
+          aria-label="Review pages"
+        >
           {Array.from({ length: totalPages }).map((_, i) => (
             <span
               key={i}
@@ -128,13 +145,15 @@ export default function CustomerReviews() {
               }`}
             />
           ))}
-        </div>
+        </nav>
 
+        {/* Controls */}
         <div className="flex justify-center gap-6 mt-4">
+          {/* button → Medium (500) */}
           <button
             onClick={() => scroll("left")}
             disabled={scrollIndex === 0}
-            className="w-10 h-10 bg-white border-2 border-[#891F1A] text-[#891F1A] rounded-full flex items-center justify-center hover:bg-[#891F1A] hover:text-white transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-10 h-10 bg-white border-2 border-[#891F1A] text-[#891F1A] rounded-full flex items-center justify-center hover:bg-[#891F1A] hover:text-white transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             aria-label="Scroll to previous reviews"
           >
             <FaChevronLeft />
@@ -142,7 +161,7 @@ export default function CustomerReviews() {
           <button
             onClick={() => scroll("right")}
             disabled={scrollIndex === totalPages - 1}
-            className="w-10 h-10 bg-white border-2 border-[#891F1A] text-[#891F1A] rounded-full flex items-center justify-center hover:bg-[#891F1A] hover:text-white transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-10 h-10 bg-white border-2 border-[#891F1A] text-[#891F1A] rounded-full flex items-center justify-center hover:bg-[#891F1A] hover:text-white transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             aria-label="Scroll to next reviews"
           >
             <FaChevronRight />
@@ -161,5 +180,4 @@ export default function CustomerReviews() {
       `}</style>
     </section>
   );
-  
 }

@@ -39,6 +39,9 @@ interface Category {
   url: string;
   images: { url: string; alt_text?: string }[];
   subcategories: Subcategory[];
+  /** Enriched from /api/show-categories/ */
+  description?: string;
+  caption?: string;
 }
 
 interface HeroImage {
@@ -61,21 +64,67 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
 
   const [heroImages, setHeroImages] = useState<HeroImage[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const fallbackImage = '/images/img1.jpg';
+  const [desktopImages, setDesktopImages] = useState<string[]>([fallbackImage]);
+  const [mobileImages, setMobileImages] = useState<string[]>([fallbackImage]);
+  const [desktopIndex, setDesktopIndex] = useState(0);
+  const [mobileIndex, setMobileIndex] = useState(0);
 
   useEffect(() => {
     const fetchCategoryData = async () => {
       try {
-        const res = await fetchWithKey(`${API_BASE_URL}/api/show_nav_items/`, {
+        // 1) Get nav items and find the current category
+        const navRes = await fetchWithKey(`${API_BASE_URL}/api/show_nav_items/`, {
           cache: 'no-store',
         });
-        if (!res.ok) throw new Error('Failed to fetch nav items');
-        const data: Category[] = await res.json();
+        if (!navRes.ok) throw new Error('Failed to fetch nav items');
+        const navData: Category[] = await navRes.json();
 
-        const matchedCategory = data.find(
+        const matchedCategory = navData.find(
           (cat) => cat.url.toLowerCase() === categorySlug.toLowerCase()
         );
 
-        setCategoryInfo(matchedCategory || null);
+        if (!matchedCategory) {
+          setCategoryInfo(null);
+          return;
+        }
+
+        // 2) Enrich with description from ShowCategoryAPIView (/api/show-categories/)
+        try {
+          const catRes = await fetchWithKey(`${API_BASE_URL}/api/show-categories/`, {
+            cache: 'no-store',
+          });
+          if (catRes.ok) {
+            const catList: Array<{
+              id: string;
+              name: string;
+              description?: string;
+              caption?: string;
+              image?: string;
+              imageAlt?: string;
+            }> = await catRes.json();
+
+            // Match by id if available, else by name
+            const matchById =
+              catList.find((c) => String(c.id) === String(matchedCategory.id)) ??
+              catList.find((c) => c.name?.toLowerCase() === matchedCategory.name?.toLowerCase());
+
+            if (matchById) {
+              setCategoryInfo({
+                ...matchedCategory,
+                description: matchById.description ?? matchedCategory.description,
+                caption: matchById.caption ?? matchedCategory.caption,
+              });
+            } else {
+              setCategoryInfo(matchedCategory);
+            }
+          } else {
+            // If categories call fails, still render with nav data
+            setCategoryInfo(matchedCategory);
+          }
+        } catch {
+          setCategoryInfo(matchedCategory);
+        }
       } catch (error) {
         console.error('❌ Category fetch error:', error);
         setCategoryInfo(null);
@@ -89,7 +138,14 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
         const res = await fetchWithKey(`${API_BASE_URL}/api/hero-banner/`);
         if (!res.ok) throw new Error('Failed to fetch hero images');
         const data = await res.json();
-        setHeroImages(data.images || []);
+        const images: HeroImage[] = data.images || [];
+
+        const desktop = images.filter((i) => i.device_type === 'desktop').map((i) => i.url);
+        const mobile = images.filter((i) => i.device_type === 'mobile').map((i) => i.url);
+
+        if (desktop.length) setDesktopImages(desktop);
+        if (mobile.length) setMobileImages(mobile);
+        setHeroImages(images);
       } catch (error) {
         console.error('❌ Hero banner fetch error:', error);
       }
@@ -103,10 +159,12 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
     if (heroImages.length > 1) {
       const interval = setInterval(() => {
         setCurrentSlide((prev) => (prev + 1) % heroImages.length);
+        setDesktopIndex((prev) => (prev + 1) % desktopImages.length);
+        setMobileIndex((prev) => (prev + 1) % mobileImages.length);
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [heroImages]);
+  }, [heroImages, desktopImages.length, mobileImages.length]);
 
   const formatCategoryName = (slug: string) =>
     slug
@@ -118,39 +176,54 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
 
   if (!categoryInfo) {
     return (
-      <div className="p-10 text-center text-red-600">
+      <div
+        className="p-10 text-center text-red-600"
+        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+      >
+        {/* h2 → Semi Bold (600) */}
         <h2 className="text-2xl font-semibold">Category not found</h2>
       </div>
     );
   }
 
   const categoryText = formatCategoryName(categorySlug);
-  const description = 'Explore our product range.';
+  const renderedDescription = categoryInfo.description?.trim() || 'Explore our product range.';
 
   return (
-    <div className="flex flex-col bg-white">
+    <div
+      className="flex flex-col bg-white"
+      style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+    >
       <Header />
       <LogoSection />
       <Navbar />
       <MobileTopBar />
 
       {/* Hero Banner */}
-      <div className="w-full h-auto overflow-hidden relative">
-        {heroImages.length > 0 && (
-          <img
-            src={heroImages[currentSlide]?.url}
-            alt={`Hero Image ${currentSlide + 1}`}
-            className="w-full h-full object-cover transition-opacity duration-500"
-          />
-        )}
-      </div>
+      <img
+        loading="lazy"
+        width="1440"
+        height="400"
+        src={desktopImages[desktopIndex]}
+        alt="Hero Desktop"
+        className="hidden sm:block w-full h-auto mx-auto"
+      />
+      <img
+        loading="lazy"
+        width="768"
+        height="300"
+        src={mobileImages[mobileIndex]}
+        alt="Hero Mobile"
+        className="block sm:hidden w-full h-auto object-cover mx-auto"
+      />
 
       {/* Subcategories */}
       <section className="px-4 sm:px-6 lg:px-24 py-10">
-        <h2 className="text-[#891F1A] text-2xl sm:text-3xl font-bold text-center mb-6">
+        {/* h2 → Semi Bold (600) */}
+        <h2 className="text-[#891F1A] text-2xl sm:text-3xl font-semibold text-center mb-6">
           {categoryText}
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6">
           {categoryInfo.subcategories.map((subcat, index) => {
             const subcatImage = subcat.images?.[0]?.url || '/images/default.jpg';
             const subcatSlug = subcat.url;
@@ -171,6 +244,9 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
                     className="w-full h-auto object-cover"
                   />
                 </div>
+                 <div className=" mt-2">
+                  <p className="text-gray-800 font-medium">{subcat.name}</p>
+                </div>
               </Link>
             );
           })}
@@ -180,20 +256,25 @@ const CategoryPage: React.FC<Props> = ({ params }) => {
       {/* Category Info */}
       <section className="text-gray-600 body-font overflow-hidden">
         <div className="container px-5 py-24 mx-auto">
-          <div className="lg:w-full mx-auto flex flex-wrap justify-center">
+          <div className="lg:w/full mx-auto flex flex-wrap justify-center">
             <img
               loading="lazy"
               alt="Category Description"
-              src={categoryInfo.images?.[0]?.url || '/images/default.jpg'}
+              src={categoryInfo.images?.[0]?.url || '/images/img1.jpg'}
               width={492}
               height={326}
               className="object-cover object-center rounded mb-5"
             />
             <div className="lg:w-1/2 w-full mt-3 lg:pl-12 lg:py-4 lg:mt-0">
+              {/* h1 → Bold (700) */}
               <h1 className="text-red-700 text-4xl font-bold mb-1">
                 {categoryText}
               </h1>
-              <p className="leading-relaxed">{description}</p>
+              {/* p → Regular (400) */}
+              <p className="leading-relaxed font-normal">{renderedDescription}</p>
+              {categoryInfo.caption?.trim() ? (
+                <p className="leading-relaxed mt-3 text-gray-700 font-normal">{categoryInfo.caption}</p>
+              ) : null}
             </div>
           </div>
         </div>

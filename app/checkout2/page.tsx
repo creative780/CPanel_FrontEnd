@@ -47,7 +47,7 @@ export default function PaymentCheckoutPage() {
       string,
       {
         cart_item_id?: string;
-        product_id: string;                      // real product id for backend
+        product_id: string; // real product id for backend
         selected_size?: string;
         selected_attributes?: Record<string, string>;
         selected_attributes_human?: HumanAttr[];
@@ -137,7 +137,7 @@ export default function PaymentCheckoutPage() {
             selectionDesc, // show clean selections under name
           ]);
 
-          // Stash metadata used later, including base & deltas for WhatsApp message
+          // Stash metadata used later
           const basePriceNum = parseFloat(item?.price_breakdown?.base_price ?? '0') || 0;
           const lineTotalNum = parseFloat(item?.price_breakdown?.line_total ?? '0') || 0;
           const attrsDeltaNum = parseFloat(
@@ -212,12 +212,11 @@ export default function PaymentCheckoutPage() {
     }));
 
     try {
-      // Use variant_signature for precise deletion of this variant line
       const res = await fetchWithKey(`${API_BASE_URL}/api/delete-cart-item/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: token,                       // kept for compatibility
+          user_id: token,
           product_id: realProductId,
           variant_signature: meta?.variant_signature || '',
         }),
@@ -244,8 +243,6 @@ export default function PaymentCheckoutPage() {
   };
 
   const handleOrderNow = async () => {
-    // Build WhatsApp message with exact math format:
-    // Product (Paper Type: Simple, Size: 49): 3 x $(4 + 0 + 5) = $27
     let msgLines: string[] = [
       `Name: ${userInfo.name || 'N/A'}`,
       `Email: ${userInfo.email || 'N/A'}`,
@@ -259,7 +256,6 @@ export default function PaymentCheckoutPage() {
       `Order:`,
     ];
 
-    // Basic validation for delivery
     if (!userInfo.email || !userInfo.address || !userInfo.city || !userInfo.phone) {
       Toastify({
         text: "Please fill in all required delivery fields",
@@ -275,11 +271,9 @@ export default function PaymentCheckoutPage() {
       const qty = quantities[rowId] || 1;
       const unitPrice = customPrices[rowId] || 0;
 
-      // ✅ Keep the real type; avoid widening to {}
       const meta = cartMeta[rowId];
       const realProductId = meta?.product_id ?? rowId;
 
-      // Human-readable pieces for message
       const size = meta?.selected_size?.trim() ? `Size: ${meta.selected_size.trim()}` : '';
       const human = Array.isArray(meta?.selected_attributes_human) ? meta.selected_attributes_human : [];
 
@@ -288,21 +282,18 @@ export default function PaymentCheckoutPage() {
       human.forEach((d) => selectionTokens.push(`${d.attribute_name}: ${d.option_label}`));
       const selectionParen = selectionTokens.length ? ` (${selectionTokens.join(', ')})` : '';
 
-      // Price math parts: base + ALL deltas (including zeros)
-      const base = typeof meta?.base_price === 'number' ? meta.base_price : unitPrice; // fallback if not sent
+      const base = typeof meta?.base_price === 'number' ? meta.base_price : unitPrice;
       const deltas = human.map((d) => d.price_delta || '0');
       const mathParts = [base.toString(), ...deltas].join(' + ');
       const lineTotal = (unitPrice * qty).toFixed(2);
 
       msgLines.push(`${name}${selectionParen}: ${qty} x $(${mathParts}) = $${lineTotal}`);
 
-      // Backend payload item — includes human list + base_price
       itemsForBackend.push({
         product_id: realProductId,
         quantity: parseInt(qty.toString()),
         unit_price: Number(unitPrice.toFixed(2)),
         total_price: Number((unitPrice * qty).toFixed(2)),
-
         selected_size: meta?.selected_size || '',
         selected_attributes: meta?.selected_attributes || {},
         selected_attributes_human: human,
@@ -352,7 +343,6 @@ export default function PaymentCheckoutPage() {
         backgroundColor: "#c41717ff"
       }).showToast();
 
-      // Clear Cart on frontend & backend
       for (const [rowId] of cartData.products) {
         const meta = cartMeta[rowId];
         const realProductId = meta?.product_id || rowId;
@@ -375,7 +365,6 @@ export default function PaymentCheckoutPage() {
       setQuantities({});
       setCustomPrices({});
 
-      // WhatsApp message with the detailed breakdown format
       const msg = msgLines.join('\n');
       window.open(`https://wa.me/923423773564?text=${encodeURIComponent(msg)}`, '_blank');
     } catch (err) {
@@ -399,22 +388,30 @@ export default function PaymentCheckoutPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-xl text-gray-600">
+      <div
+        className="min-h-screen flex items-center justify-center text-xl text-gray-600"
+        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+      >
         Loading your cart...
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 text-black text-[3.5vw] sm:text-base">
+    <div
+      className="min-h-screen bg-gray-50 text-black text-[3.5vw] sm:text-base"
+      style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+    >
       <Header />
       <LogoSection />
       <MobileTopBar />
 
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Delivery Section */}
-        <div className="bg-white shadow rounded-lg p-8">
+        <section className="bg-white shadow rounded-lg p-8">
+          {/* h2 → Semi Bold (600) */}
           <h2 className="text-2xl font-semibold mb-6 text-black">Delivery Address</h2>
+
           <div className="space-y-4 text-black">
             {[
               { label: 'Full Name', key: 'name' },
@@ -426,8 +423,12 @@ export default function PaymentCheckoutPage() {
               { label: 'Zip', key: 'zip' },
               { label: 'Instructions', key: 'instructions' }
             ].map(({ label, key }) => (
-              <div key={key} className={['phone', 'company', 'city', 'zip', 'instructions'].includes(key) ? 'w-full sm:w-1/2' : ''}>
-                <label className="text-sm font-medium">{label}</label>
+              <div
+                key={key}
+                className={['phone', 'company', 'city', 'zip', 'instructions'].includes(key) ? 'w-full sm:w-1/2' : ''}
+              >
+                {/* label → Regular (400) */}
+                <label className="text-sm font-normal">{label}</label>
                 <input
                   type="text"
                   onChange={(e) => setUserInfo((prev) => ({ ...prev, [key]: e.target.value }))}
@@ -437,25 +438,31 @@ export default function PaymentCheckoutPage() {
               </div>
             ))}
           </div>
+
+          {/* button → Medium (500) */}
           <button
             onClick={handleOrderNow}
             disabled={cartData.products.length === 0}
             className={`w-full mt-8 py-3 text-sm font-medium rounded-md transition-all
               ${cartData.products.length === 0 
                 ? 'bg-gray-300 text-gray-600 cursor-not-allowed' 
-                : 'bg-[#891F1A] text-white hover:bg-[#6e1815]'}`}>
+                : 'bg-[#891F1A] text-white hover:bg-[#6e1815]'}`}
+          >
             Order Now
           </button>
-        </div>
+        </section>
 
         {/* Order Summary */}
-        <div className="bg-white shadow rounded-lg p-8">
-          <h3 className="text-2xl font-semibold mb-6 text-black">Order</h3>
+        <section className="bg-white shadow rounded-lg p-8">
+          {/* h2 → Semi Bold (600) */}
+          <h2 className="text-2xl font-semibold mb-6 text-black">Order</h2>
+
           <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
             {orderItems.map((item) => (
-              <div
+              <article
                 key={item.id}
-                className="flex flex-wrap sm:flex-nowrap items-center justify-between border p-3 rounded-md bg-gray-50 text-black">
+                className="flex flex-wrap sm:flex-nowrap items-center justify-between border p-3 rounded-md bg-gray-50 text-black"
+              >
                 <img
                   src={item.pic || '/images/default.jpg'}
                   alt={item.name}
@@ -466,39 +473,48 @@ export default function PaymentCheckoutPage() {
                   onError={(e) => (e.currentTarget.src = '/images/img1.jpg')}
                 />
                 <div className="flex-1 ml-4 text-sm min-w-[160px]">
-                  <p className="font-medium line-clamp-1">{item.name}</p>
-                  {/* show human selections under product name */}
+                  {/* h4 → Medium (500) */}
+                  <h4 className="font-medium line-clamp-1">{item.name}</h4>
+                  {/* p → Regular (400) */}
                   {item.desc ? (
-                    <p className="text-xs text-gray-600 mt-0.5">{item.desc}</p>
+                    <p className="text-xs text-gray-600 mt-0.5 font-normal">{item.desc}</p>
                   ) : null}
                 </div>
+
                 <div className="flex items-center space-x-1 my-2 sm:my-0">
+                  {/* buttons → Medium (500) */}
                   <button
                     onClick={() => updateQuantity(item.id, -1)}
-                    className="border w-8 h-8 flex items-center justify-center rounded">
+                    className="border w-8 h-8 flex items-center justify-center rounded font-medium"
+                    aria-label="Decrease quantity"
+                  >
                     <Minus size={15} />
                   </button>
-                  <span>{item.quantity}</span>
+                  {/* span → Regular (400) */}
+                  <span className="font-normal">{item.quantity}</span>
                   <button
                     onClick={() => updateQuantity(item.id, 1)}
-                    className="border w-8 h-8 flex items-center justify-center rounded">
+                    className="border w-8 h-8 flex items-center justify-center rounded font-medium"
+                    aria-label="Increase quantity"
+                  >
                     <Plus size={15} />
                   </button>
                 </div>
+
                 <div className="flex flex-col items-end ml-4 space-y-1">
-                  {/* You can show price if needed:
-                  <span className="text-sm font-medium">${(item.price * item.quantity).toFixed(2)}</span> */}
-                  <button onClick={() => removeItem(item.id)}>
+                  {/* Remove line button → Medium (500) is fine */}
+                  <button onClick={() => removeItem(item.id)} className="font-medium" aria-label="Remove item">
                     <Trash2 size={14} className="text-red-600" />
                   </button>
                 </div>
-              </div>
+              </article>
             ))}
           </div>
 
           {/* Discount */}
           <div className="mt-6">
-            <label className="text-sm font-medium text-black mb-1 block">Discount Code</label>
+            {/* label → Regular (400) */}
+            <label className="text-sm font-normal text-black mb-1 block">Discount Code</label>
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
@@ -506,6 +522,7 @@ export default function PaymentCheckoutPage() {
                 onChange={(e) => setDiscountCode(e.target.value)}
                 className="flex-1 px-2 py-2 border border-gray-300 rounded-md"
               />
+              {/* button → Medium (500) */}
               <button
                 onClick={() =>
                   Toastify({
@@ -514,7 +531,8 @@ export default function PaymentCheckoutPage() {
                     backgroundColor: '#d32f2f',
                   }).showToast()
                 }
-                className="px-4 py-2 border border-gray-300 rounded-md">
+                className="px-4 py-2 border border-gray-300 rounded-md font-medium"
+              >
                 Apply
               </button>
             </div>
@@ -522,12 +540,25 @@ export default function PaymentCheckoutPage() {
 
           {/* Totals */}
           <div className="mt-6 border-t pt-4 space-y-2 text-black">
-            <div className="flex justify-between text-sm"><span>Subtotal</span><span>${subtotal.toFixed(2)}</span></div>
-            <div className="flex justify-between text-sm"><span>Tax</span><span>${tax}</span></div>
-            <div className="flex justify-between text-sm"><span>Shipping</span><span>${shipping}</span></div>
-            <div className="flex justify-between font-semibold text-lg pt-2 border-t"><span>Total</span><span>${total.toFixed(2)}</span></div>
+            <div className="flex justify-between text-sm">
+              <span className="font-normal">Subtotal</span>
+              <span className="font-normal">${subtotal.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="font-normal">Tax</span>
+              <span className="font-normal">${tax}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="font-normal">Shipping</span>
+              <span className="font-normal">${shipping}</span>
+            </div>
+            <div className="flex justify-between pt-2 border-t">
+              {/* strong → Bold (700) */}
+              <strong className="text-lg">Total</strong>
+              <strong className="text-lg">${total.toFixed(2)}</strong>
+            </div>
           </div>
-        </div>
+        </section>
       </div>
 
       <Footer />

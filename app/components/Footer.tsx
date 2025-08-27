@@ -57,19 +57,22 @@ export default function Footer() {
       .then((data) => {
         const catNames = data
           ?.map((category: any) => category.name)
-          .slice(0, 8); // Limit to first 8 categories
+          .slice(0, 8);
         setCategories(catNames || []);
       })
       .catch((err) => console.error("Error fetching categories:", err));
   }, []);
 
-  // Split categories into two columns
   const midPoint = Math.ceil(categories.length / 2);
   const firstCol = categories.slice(0, midPoint);
   const secondCol = categories.slice(midPoint);
 
   return (
-    <footer className="bg-[#891F1A] text-white text-sm" role="contentinfo">
+    <footer
+      style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
+      className="bg-[#891F1A] text-white font-normal text-sm"
+      role="contentinfo"
+    >
       {/* ===================== Top Grid ===================== */}
       <div className="container mx-auto px-5 py-16 flex flex-wrap md:flex-nowrap gap-y-10">
         {/* Column 1: Logo + Company Info */}
@@ -84,7 +87,8 @@ export default function Footer() {
             className="object-contain mb-3"
             onError={(e) => (e.currentTarget.src = "/images/default.jpg")}
           />
-          <p className="text-sm leading-relaxed">
+          {/* p → Regular (400) */}
+          <p className="text-sm leading-relaxed font-normal">
             Air plant banjo lyft occupy retro adaptogen indego.
           </p>
         </div>
@@ -93,11 +97,19 @@ export default function Footer() {
         {categories.length > 0 && (
           <div className="w-full md:w-2/5 px-4 flex flex-col md:flex-row gap-6">
             <div className="flex-1">
-              <h2 className="font-semibold tracking-widest text-sm mb-3 uppercase">Categories</h2>
+              {/* h2 → Semi Bold (600) */}
+              <h2 className="font-semibold tracking-widest text-sm mb-3 uppercase">
+                Categories
+              </h2>
               <ul className="space-y-2">
                 {firstCol.map((cat, idx) => (
                   <li key={idx}>
-                    <a href={slugify(cat)} className="hover:underline" aria-label={`Go to ${cat}`}>
+                    {/* a → Regular / Medium */}
+                    <a
+                      href={slugify(cat)}
+                      className="hover:underline font-normal"
+                      aria-label={`Go to ${cat}`}
+                    >
                       {cat}
                     </a>
                   </li>
@@ -110,7 +122,11 @@ export default function Footer() {
                 <ul className="space-y-2">
                   {secondCol.map((cat, idx) => (
                     <li key={idx}>
-                      <a href={slugify(cat)} className="hover:underline" aria-label={`Go to ${cat}`}>
+                      <a
+                        href={slugify(cat)}
+                        className="hover:underline font-normal"
+                        aria-label={`Go to ${cat}`}
+                      >
                         {cat}
                       </a>
                     </li>
@@ -123,9 +139,10 @@ export default function Footer() {
 
         {/* Column 4: Services (Toggle) */}
         <div className="w-full md:w-1/5 px-4">
+          {/* button → Medium (500) */}
           <button
             onClick={() => toggleDropdown("services")}
-            className="flex items-center gap-2 font-semibold tracking-widest text-sm mb-3 uppercase"
+            className="flex items-center gap-2 font-medium tracking-widest text-sm mb-3 uppercase"
             aria-expanded={openCols.services}
           >
             <span>{openCols.services ? "▾" : "▸"}</span> Services
@@ -140,7 +157,7 @@ export default function Footer() {
                 <li key={i}>
                   <a
                     href={`/services${slugify(srv)}`}
-                    className="hover:underline"
+                    className="hover:underline font-normal"
                     aria-label={`Service: ${srv}`}
                   >
                     {srv}
@@ -155,7 +172,7 @@ export default function Footer() {
         <div className="w-full md:w-1/5 px-4">
           <button
             onClick={() => toggleDropdown("map")}
-            className="flex items-center gap-2 font-semibold tracking-widest text-sm mb-3 uppercase"
+            className="flex items-center gap-2 font-medium tracking-widest text-sm mb-3 uppercase"
             aria-expanded={openCols.map}
           >
             <span>{openCols.map ? "▾" : "▸"}</span> Map
@@ -170,7 +187,7 @@ export default function Footer() {
                 <li key={i}>
                   <a
                     href={`/map${slugify(item)}`}
-                    className="hover:underline"
+                    className="hover:underline font-normal"
                     aria-label={`Map link: ${item}`}
                   >
                     {item}
@@ -187,20 +204,37 @@ export default function Footer() {
 
       {/* ===================== Bottom Bar ===================== */}
       <div className="container mx-auto px-5 py-4 flex flex-col sm:flex-row justify-between items-center">
-        <p className="text-[#F3EFEE] text-sm text-center sm:text-left">
+        {/* p → Light (300) for footer info */}
+        <p className="text-[#F3EFEE] text-sm text-center sm:text-left font-light">
           © 2025 CreativePrints — All rights reserved.
         </p>
         <div className="flex gap-4 mt-2 sm:mt-0 text-white text-lg">
-          <a href="https://www.facebook.com/creativeconnectuae/" className="hover:text-gray-300" aria-label="Facebook">
+          <a
+            href="https://www.facebook.com/creativeconnectuae/"
+            className="hover:text-gray-300 font-normal"
+            aria-label="Facebook"
+          >
             <FaFacebookF />
           </a>
-          <a href="https://x.com/" className="hover:text-gray-300" aria-label="Twitter">
+          <a
+            href="https://x.com/"
+            className="hover:text-gray-300 font-normal"
+            aria-label="Twitter"
+          >
             <FaTwitter />
           </a>
-          <a href="https://www.instagram.com/creativeconnectuae/" className="hover:text-gray-300" aria-label="Instagram">
+          <a
+            href="https://www.instagram.com/creativeconnectuae/"
+            className="hover:text-gray-300 font-normal"
+            aria-label="Instagram"
+          >
             <FaInstagram />
           </a>
-          <a href="https://www.linkedin.com/company/creative-connect-advertising-llc/" className="hover:text-gray-300" aria-label="LinkedIn">
+          <a
+            href="https://www.linkedin.com/company/creative-connect-advertising-llc/"
+            className="hover:text-gray-300 font-normal"
+            aria-label="LinkedIn"
+          >
             <FaLinkedin />
           </a>
         </div>

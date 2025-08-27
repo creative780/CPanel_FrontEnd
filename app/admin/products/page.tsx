@@ -25,9 +25,7 @@ const parseJsonStrict = async (res: Response, label: string) => {
   let json: any = {};
   try {
     json = bodyText ? JSON.parse(bodyText) : {};
-  } catch {
-    // fine; we'll fall back to text body in message
-  }
+  } catch {}
   if (!res.ok) {
     const msg = json?.error || bodyText || `${label}: HTTP ${res.status}`;
     throw new Error(msg.length > 400 ? msg.slice(0, 400) + '…' : msg);
@@ -70,9 +68,13 @@ const printingMethodShortForms: Record<string, string> = {
 
 type ServerProduct = {
   id: string;
+  product_id?: string;
   name: string;
   image?: string;
-  subcategory?: { id: string; name: string };
+  /** legacy single */
+  subcategory?: { id: string; name: string } | null;
+  /** all mappings from backend */
+  subcategories?: { id: string; name: string }[];
   stock_status?: string;
   stock_quantity?: number | string;
   price: string | number;
@@ -80,10 +82,12 @@ type ServerProduct = {
   brand_title?: string;
   fit_description?: string;
   sizes?: string[];
+  created_at?: string;
 };
 
 const mapServerProduct = (p: ServerProduct) => ({
   ...p,
+  subcategories: Array.isArray(p.subcategories) ? p.subcategories : [],
   brand_title: p.brand_title ?? '',
   fit_description: p.fit_description ?? '',
   sizes: Array.isArray(p.sizes) ? p.sizes : [],
@@ -93,12 +97,17 @@ const mapServerProduct = (p: ServerProduct) => ({
   stock_status: (p.stock_status || '').toString(),
 });
 
+type SubNode = {
+  subcategory_id: string; id: string; name: string; products?: any[]; categories?: string[]; status?: string
+};
+
 export default function AdminProductManager() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [rawData, setRawData] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
-  const [subcategories, setSubcategories] = useState<any[]>([]);
+  const [subcategories, setSubcategories] = useState<SubNode[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [allProductsMaster, setAllProductsMaster] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedSubCategory, setSelectedSubCategory] = useState('__all__');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -107,90 +116,114 @@ export default function AdminProductManager() {
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [isMounted, setIsMounted] = useState(false);
+  // near other guards
+  const [isUnlinking, setIsUnlinking] = useState(false);
 
-  /** UI guards for bulk actions to avoid double submits */
+  // Change Existing Product modal
+  const [isChangeExistingOpen, setIsChangeExistingOpen] = useState(false);
+  const [changeSearch, setChangeSearch] = useState('');
+  const [changeStage, setChangeStage] = useState<'top3' | 'first25' | 'all'>('top3');
+  const [isMapping, setIsMapping] = useState<string | null>(null);
+
+  // guards
   const [isDeleting, setIsDeleting] = useState(false);
   const [isBulkOOS, setIsBulkOOS] = useState(false);
 
   const initialFetchAbortRef = useRef<AbortController | null>(null);
 
-  // ---------- Initial load with abort ----------
+  // util: uniq by id
+  const uniqueById = <T extends { id: string }>(list: T[]) =>
+    Array.from(new Map(list.map((p) => [String(p.id), p])).values());
+
+  // ---------- Data load ----------
+  const reloadAllData = useCallback(async () => {
+    const controller = new AbortController();
+    try {
+      const [catRes, subRes, prodRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey({ signal: controller.signal })),
+        fetch(`${API_BASE_URL}/api/show-subcategories/`, withFrontendKey({ signal: controller.signal })),
+        fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey({ signal: controller.signal })),
+      ]);
+
+      const [categoryData, subcategoryData, productData] = await Promise.all([
+        parseJsonStrict(catRes, 'show-categories'),
+        parseJsonStrict(subRes, 'show-subcategories'),
+        parseJsonStrict(prodRes, 'show-product'),
+      ]);
+
+      const arrCats = Array.isArray(categoryData) ? categoryData : [];
+      const arrSubs = Array.isArray(subcategoryData) ? subcategoryData : [];
+      const arrProds = (Array.isArray(productData) ? productData : []).map(mapServerProduct);
+
+      const visibleCategories = arrCats.filter((c: any) => c.status === 'visible');
+      const visibleSubcategories = arrSubs.filter((sc: any) => sc.status === 'visible');
+
+      const categoryMap = new Map<string, any>();
+      for (const c of visibleCategories) categoryMap.set(c.name, { ...c, subcategories: [] as any[] });
+
+      // Build subId -> products using all mappings (and legacy)
+      const prodsBySubId = new Map<string, any[]>();
+
+      const getAllSubIdsFor = (p: any): string[] => {
+        const many = Array.isArray(p.subcategories)
+          ? p.subcategories.map((s: any) => String(s.id)).filter(Boolean)
+          : [];
+        const legacy = p?.subcategory?.id ? [String(p.subcategory.id)] : [];
+        return Array.from(new Set([...many, ...legacy]));
+      };
+
+      for (const p of arrProds) {
+        const subIds = getAllSubIdsFor(p);
+        for (const sid of subIds) {
+          if (!prodsBySubId.has(sid)) prodsBySubId.set(sid, []);
+          prodsBySubId.get(sid)!.push(p);
+        }
+      }
+
+      // 🔧 Attach loop: put products onto each subcategory and push subs into their categories
+      for (const sub of visibleSubcategories) {
+        const sid = String((sub as any).subcategory_id || (sub as any).id || '');
+        (sub as any).products = uniqueById(prodsBySubId.get(sid) || []);
+
+        const catNames = Array.isArray((sub as any).categories) ? (sub as any).categories : [];
+        for (const catName of catNames) {
+          const c = categoryMap.get(catName);
+          if (c) c.subcategories.push(sub);
+        }
+      }
+
+      const finalData = Array.from(categoryMap.values());
+      const allSubcats = finalData.flatMap((c) => c.subcategories);
+      const allProdsFromTree = allSubcats.flatMap((sc: any) => sc.products || []);
+
+      // Prefer master list for notifications (clean, deduped)
+      const allProdsMaster = uniqueById(arrProds);
+      for (const p of allProdsMaster) {
+        const qty = Number(p.quantity ?? 0);
+        if (qty > 0 && qty <= 5) addLowStockNotification(p.name, p.id, qty);
+      }
+
+      setRawData(finalData);
+      setCategories(finalData.map((c) => c.name));
+      setSubcategories(allSubcats);
+      setProducts(allProdsFromTree);
+      setAllProductsMaster(allProdsMaster);
+    } catch (err: any) {
+      toast.error(`❌ Reload failed: ${err.message || err}`);
+    }
+  }, []);
+
   useEffect(() => {
     if (!FRONTEND_KEY) {
       toast.warn('Frontend key missing. Set NEXT_PUBLIC_FRONTEND_KEY and restart.', { autoClose: 6000 });
-      // Still load; some environments may not require the header.
     }
-
     const controller = new AbortController();
     initialFetchAbortRef.current = controller;
-
-    const run = async () => {
-      try {
-        const [catRes, subRes, prodRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey({ signal: controller.signal })),
-          fetch(`${API_BASE_URL}/api/show-subcategories/`, withFrontendKey({ signal: controller.signal })),
-          fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey({ signal: controller.signal })),
-        ]);
-
-        const [categoryData, subcategoryData, productData] = await Promise.all([
-          parseJsonStrict(catRes, 'show-categories'),
-          parseJsonStrict(subRes, 'show-subcategories'),
-          parseJsonStrict(prodRes, 'show-product'),
-        ]);
-
-        const arrCats = Array.isArray(categoryData) ? categoryData : [];
-        const arrSubs = Array.isArray(subcategoryData) ? subcategoryData : [];
-        const arrProds = Array.isArray(productData) ? productData : [];
-
-        const visibleCategories = arrCats.filter((c: any) => c.status === 'visible');
-        const visibleSubcategories = arrSubs.filter((sc: any) => sc.status === 'visible');
-
-        // Build category map once (O(n))
-        const categoryMap = new Map<string, any>();
-        for (const c of visibleCategories) categoryMap.set(c.name, { ...c, subcategories: [] as any[] });
-
-        // Pre-index products by subcategory id for O(n)
-        const prodsBySubId = new Map<string, any[]>();
-        for (const p of arrProds) {
-          const sid = p?.subcategory?.id;
-          if (!sid) continue;
-          if (!prodsBySubId.has(sid)) prodsBySubId.set(sid, []);
-          prodsBySubId.get(sid)!.push(mapServerProduct(p));
-        }
-
-        for (const sub of visibleSubcategories) {
-          sub.products = prodsBySubId.get(sub.id) || [];
-          for (const catName of sub.categories || []) {
-            const c = categoryMap.get(catName);
-            if (c) c.subcategories.push(sub);
-          }
-        }
-
-        const finalData = Array.from(categoryMap.values());
-        const allSubcats = finalData.flatMap((c) => c.subcategories);
-        const allProds = allSubcats.flatMap((sc: any) => sc.products);
-
-        // Only notify low-stock once per fresh fetch
-        for (const p of allProds) {
-          const qty = Number(p.quantity ?? 0);
-          if (qty > 0 && qty <= 5) addLowStockNotification(p.name, p.id, qty);
-        }
-
-        setRawData(finalData);
-        setCategories(finalData.map((c) => c.name));
-        setSubcategories(allSubcats);
-        setProducts(allProds);
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
-        toast.error(`❌ Failed to load data: ${err.message || err}`);
-      }
-    };
-
-    run();
+    reloadAllData();
     return () => controller.abort();
-  }, []);
+  }, [reloadAllData]);
 
-  // ---------- Category/Subcategory cascades ----------
+  // ---------- Cascades ----------
   useEffect(() => {
     if (!selectedCategory) {
       const allSubs = rawData.flatMap((c) => c.subcategories);
@@ -202,58 +235,98 @@ export default function AdminProductManager() {
   }, [selectedCategory, rawData]);
 
   useEffect(() => {
+    const allSubs = rawData.flatMap((c) => c.subcategories);
+
     if (!selectedCategory && selectedSubCategory === '__all__') {
-      const allProds = rawData.flatMap((c) => c.subcategories.flatMap((sc: any) => sc.products));
-      setProducts(allProds);
-    } else if (selectedCategory && selectedSubCategory === '__all__') {
+      const all = allSubs.flatMap((sc: any) => sc.products || []);
+      setProducts(uniqueById(all)); // de-dupe in global "All"
+      return;
+    }
+
+    if (selectedCategory && selectedSubCategory === '__all__') {
       const cat = rawData.find((c) => c.name === selectedCategory);
-      const catProds = cat?.subcategories.flatMap((sc: any) => sc.products) || [];
-      setProducts(catProds);
-    } else if (selectedSubCategory && selectedSubCategory !== '__all__') {
-      const allSubs = rawData.flatMap((c) => c.subcategories);
+      const catProds = (cat?.subcategories || []).flatMap((sc: any) => sc.products || []);
+      setProducts(uniqueById(catProds)); // de-dupe in Category + All
+      return;
+    }
+
+    if (selectedSubCategory && selectedSubCategory !== '__all__') {
       const sub = allSubs.find((sc: any) => sc.name === selectedSubCategory);
-      setProducts(sub?.products || []);
+      setProducts(uniqueById(sub?.products || [])); // specific subcategory (includes multi-mapped)
+      return;
     }
   }, [selectedCategory, selectedSubCategory, rawData]);
 
   useEffect(() => setIsMounted(true), []);
 
-  // ---------- Refetch products (single source of truth) ----------
-  const refreshProducts = useCallback(async () => {
-    try {
-      const controller = new AbortController();
-      const res = await fetch(`${API_BASE_URL}/api/show-product/`, withFrontendKey({ signal: controller.signal }));
-      const parsed = await parseJsonStrict(res, 'show-product');
-      const refreshedProds = (Array.isArray(parsed) ? parsed : []).map(mapServerProduct);
-      setProducts(refreshedProds);
-    } catch (err: any) {
-      toast.error(`❌ Refresh failed: ${err.message || err}`);
-    }
-  }, []);
+  const selectedSubcategoryId = useMemo(() => {
+    if (selectedSubCategory === '__all__') return null;
+    const sub = subcategories.find((s: any) => s.name === selectedSubCategory);
+    // Prefer canonical subcategory_id, fallback to id
+    return sub ? String(sub.subcategory_id || sub.id) : null;
+  }, [selectedSubCategory, subcategories]);
 
-  // ---------- Mark Out Of Stock (bulk) ----------
+  // ---------- Bulk OOS ----------
   const handleBulkMarkOutOfStock = useCallback(async () => {
     if (selectedProductIds.length === 0 || isBulkOOS) return;
     setIsBulkOOS(true);
+
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/api/edit-product/`,
-        withFrontendKey({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ product_ids: selectedProductIds, quantity: 0 }),
-        })
-      );
-      await parseJsonStrict(res, 'edit-product');
-      toast.success('📦 Selected products marked Out Of Stock');
+      const byId = new Map<string, any>();
+      for (const p of products) byId.set(String(p.id), p);
+
+      const getSubIdsForProduct = (pid: string): string[] => {
+        const p = byId.get(String(pid));
+        const single = p?.subcategory?.id ? [String(p.subcategory.id)] : [];
+
+        const subs: string[] = [];
+        if (!single.length) {
+          for (const c of rawData) {
+            for (const sc of c.subcategories || []) {
+              const hit = (sc.products || []).some((px: any) => String(px.id) === String(pid));
+              if (hit && (sc.subcategory_id || sc.id)) subs.push(String(sc.subcategory_id || sc.id));
+            }
+          }
+        }
+        return Array.from(new Set([...single, ...subs]));
+      };
+
+      const requests = selectedProductIds.map((pid) => {
+        const subIds = getSubIdsForProduct(pid);
+        const payload = {
+          product_ids: [pid],
+          quantity: 0,
+          selectedSubcategories: subIds,
+          subcategory_ids: subIds,
+          preserve_mappings: true,
+        };
+
+        return fetch(
+          `${API_BASE_URL}/api/edit-product/`,
+          withFrontendKey({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        ).then((res) => parseJsonStrict(res, 'edit-product'));
+      });
+
+      const results = await Promise.allSettled(requests);
+      const fails = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[];
+      if (fails.length > 0) {
+        toast.error(`❌ ${fails.length} product(s) failed to update. Others succeeded.`);
+      } else {
+        toast.success('📦 Selected products marked Out Of Stock');
+      }
+
       setSelectedProductIds([]);
-      await refreshProducts();
+      await reloadAllData();
     } catch (err: any) {
       toast.error(`❌ Failed: ${err.message || err}`);
     } finally {
       setIsBulkOOS(false);
     }
-  }, [selectedProductIds, isBulkOOS, refreshProducts]);
+  }, [selectedProductIds, isBulkOOS, products, rawData, reloadAllData]);
 
   // ---------- Delete ----------
   const handleDeleteMultiple = useCallback(async () => {
@@ -274,15 +347,65 @@ export default function AdminProductManager() {
       await parseJsonStrict(res, 'delete-product');
       toast.success('🗑️ Selected products deleted');
       setSelectedProductIds([]);
-      await refreshProducts();
+      await reloadAllData();
     } catch (err: any) {
       toast.error(`❌ Delete failed: ${err.message || err}`);
     } finally {
       setIsDeleting(false);
     }
-  }, [selectedProductIds, isDeleting, refreshProducts]);
+  }, [selectedProductIds, isDeleting, reloadAllData]);
 
-  // ---------- Selection helpers ----------
+  // add below handleDeleteMultiple (or nearby)
+const handleBulkUnlinkFromSubcategory = useCallback(async () => {
+  if (!selectedSubcategoryId) {
+    toast.error('Select a specific subcategory first.');
+    return;
+  }
+  if (selectedProductIds.length === 0 || isUnlinking) return;
+
+  setIsUnlinking(true);
+  try {
+    // Build quick lookup to resolve product_id vs id
+    const byId = new Map<string, any>();
+    for (const p of products) byId.set(String(p.id), p);
+
+    const calls = selectedProductIds.map((pid) => {
+      const p = byId.get(String(pid));
+      const productId = String(p?.product_id || p?.id);
+      if (!productId) return Promise.reject(new Error(`Missing product_id for ${pid}`));
+
+      const payload = {
+        product_id: productId,
+        // API accepts subcategory_ids or subcategory_id; send the array explicitly
+        subcategory_ids: [String(selectedSubcategoryId)],
+      };
+
+      return fetch(
+        `${API_BASE_URL}/api/unlink-product-subcategory/`,
+        withFrontendKey({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      ).then((res) => parseJsonStrict(res, 'unlink-product-subcategory'));
+    });
+
+    const results = await Promise.allSettled(calls);
+    const ok = results.filter(r => r.status === 'fulfilled').length;
+    const fail = results.length - ok;
+
+    if (ok > 0) toast.success(`🔗 Unlinked ${ok} product(s) from the subcategory`);
+    if (fail > 0) toast.error(`❌ ${fail} unlink(s) failed`);
+
+    setSelectedProductIds([]);
+    await reloadAllData();
+  } catch (err: any) {
+    toast.error(`❌ Unlink failed: ${err.message || err}`);
+  } finally {
+    setIsUnlinking(false);
+  }
+}, [selectedProductIds, isUnlinking, products, selectedSubcategoryId, reloadAllData]);
+
   const toggleSelectProduct = useCallback((id: string) => {
     setSelectedProductIds((prev) => (prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]));
   }, []);
@@ -334,7 +457,6 @@ export default function AdminProductManager() {
       const [moved] = reordered.splice(result.source.index, 1);
       reordered.splice(result.destination.index, 0, moved);
 
-      // Update local products according to new id order
       setProducts((prev) => {
         const idOrder = reordered.map((p) => p.id);
         const mapPrev = new Map(prev.map((p) => [p.id, p]));
@@ -357,6 +479,83 @@ export default function AdminProductManager() {
       }
     },
     [canReorder, filteredAndSortedProducts]
+  );
+
+  // ---------- Change Existing Product modal helpers ----------
+  const sortByRecent = useCallback((list: any[]) => {
+    return [...list].sort((a, b) => {
+      const aTime = a.created_at ? Date.parse(a.created_at) : NaN;
+      const bTime = b.created_at ? Date.parse(b.created_at) : NaN;
+      if (!isNaN(aTime) && !isNaN(bTime)) return bTime - aTime;
+      const aId = Number(a.id);
+      const bId = Number(b.id);
+      if (!isNaN(aId) && !isNaN(bId)) return bId - aId;
+      return 0;
+    });
+  }, []);
+
+  const sortByAlpha = useCallback((list: any[]) => {
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, []);
+
+  const modalFiltered = useMemo(() => {
+    const base = allProductsMaster || [];
+    if (changeSearch.trim()) {
+      const q = changeSearch.trim().toLowerCase();
+      return base.filter((p) => (p.name || '').toLowerCase().includes(q));
+    }
+    if (changeStage === 'top3') return sortByRecent(base).slice(0, 3);
+    if (changeStage === 'first25') return sortByAlpha(base).slice(0, 25);
+    return sortByAlpha(base);
+  }, [allProductsMaster, changeSearch, changeStage, sortByAlpha, sortByRecent]);
+
+  const handleAddToSelectedSub = useCallback(
+    async (product: any) => {
+      if (!selectedSubcategoryId) {
+        toast.error('Select a specific subcategory first.');
+        return;
+      }
+      try {
+        const pidToSend = String(product?.product_id || product?.id);
+        if (!pidToSend) {
+          toast.error('Missing product_id on selected product.');
+          return;
+        }
+
+        setIsMapping(product?.id || pidToSend);
+
+        const payload = {
+          product_id: pidToSend,
+          subcategory_id: String(selectedSubcategoryId),
+          replace: false, // add-only
+        };
+
+        const res = await fetch(
+          `${API_BASE_URL}/api/link-product-subcategory/`, // trailing slash
+          withFrontendKey({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        );
+        const data = await parseJsonStrict(res, 'link-product-subcategory');
+
+        if (Array.isArray(data?.skipped_missing) && data.skipped_missing.length) {
+          toast.warn(`Linked with warnings. Skipped: ${data.skipped_missing.join(', ')}`);
+        } else if (Array.isArray(data?.added) && data.added.length) {
+          toast.success('✅ Product linked to subcategory');
+        } else {
+          toast.info('No changes (already linked).');
+        }
+
+        await reloadAllData();
+      } catch (err: any) {
+        toast.error(`❌ Link failed: ${err.message || err}`);
+      } finally {
+        setIsMapping(null);
+      }
+    },
+    [selectedSubcategoryId, reloadAllData]
   );
 
   const ModalAny = Modal as unknown as React.ComponentType<any>;
@@ -394,13 +593,29 @@ export default function AdminProductManager() {
                 <option value="out">Out of Stock</option>
               </select>
 
-              <button className="bg-[#891F1A] text-white px-4 py-2 rounded" onClick={() => { setEditingProductId(null); setIsModalOpen(true); }}>
+              <button
+                className="bg-[#891F1A] text-white px-4 py-2 rounded"
+                onClick={() => { setEditingProductId(null); setIsModalOpen(true); }}
+              >
                 + Add Product
               </button>
+
+              {/* Change Existing Product */}
+              {selectedSubCategory !== '__all__' && (
+                <button
+                  type="button"
+                  onClick={() => { setIsChangeExistingOpen(true); setChangeSearch(''); setChangeStage('top3'); }}
+                  className="whitespace-nowrap bg-white border border-[#891F1A] text-[#891F1A] hover:bg-[#891F1A] hover:text-white px-3 py-2 rounded transition"
+                  title="Map an existing product into the selected subcategory"
+                >
+                  Change Existing Product
+                </button>
+              )}
             </div>
           </div>
 
           <div className="space-y-4">
+            {/* Category select */}
             <select
               className="input w-full"
               value={selectedCategory}
@@ -412,6 +627,7 @@ export default function AdminProductManager() {
               ))}
             </select>
 
+            {/* Subcategory select */}
             <select
               className="input w-full"
               value={selectedSubCategory}
@@ -541,8 +757,10 @@ export default function AdminProductManager() {
                 Note: SP = Screen Printing, DP = Digital Printing, OP = Offset Printing
               </div>
 
-              <div className="flex gap-2 ml-auto">
+             <div className="flex gap-2 ml-auto">
                 <span>Selected: {selectedProductIds.length}</span>
+
+                {/* existing Mark Out of Stock button - unchanged */}
                 <button
                   onClick={handleBulkMarkOutOfStock}
                   disabled={selectedProductIds.length === 0 || isBulkOOS}
@@ -555,32 +773,142 @@ export default function AdminProductManager() {
                   {isBulkOOS ? 'Marking…' : 'Mark Out of Stock'}
                 </button>
 
-                <button
-                  onClick={handleDeleteMultiple}
-                  disabled={selectedProductIds.length === 0 || isDeleting}
-                  className={`px-3 py-1 rounded text-sm transition-colors duration-200 ${
-                    selectedProductIds.length === 0 || isDeleting
-                      ? 'bg-gray-500 cursor-not-allowed text-white'
-                      : 'bg-[#891F1A] hover:bg-red-700 text-white'
-                  }`}
-                >
-                  {isDeleting ? 'Deleting…' : 'Delete Selected'}
-                </button>
+                {/* 🔁 NEW: if a specific subcategory is selected, show Unlink; otherwise show Delete */}
+                {selectedSubcategoryId ? (
+                  <button
+                    onClick={handleBulkUnlinkFromSubcategory}
+                    disabled={selectedProductIds.length === 0 || isUnlinking}
+                    className={`px-3 py-1 rounded text-sm transition-colors duration-200 ${
+                      selectedProductIds.length === 0 || isUnlinking
+                        ? 'bg-gray-500 cursor-not-allowed text-white'
+                        : 'bg-[#891F1A] hover:bg-red-700 text-white'
+                    }`}
+                  >
+                    {isUnlinking ? 'Unlinking…' : 'Unlink from Subcategory'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleDeleteMultiple}
+                    disabled={selectedProductIds.length === 0 || isDeleting}
+                    className={`px-3 py-1 rounded text-sm transition-colors duration-200 ${
+                      selectedProductIds.length === 0 || isDeleting
+                        ? 'bg-gray-500 cursor-not-allowed text-white'
+                        : 'bg-[#891F1A] hover:bg-red-700 text-white'
+                    }`}
+                  >
+                    {isDeleting ? 'Deleting…' : 'Delete Selected'}
+                  </button>
+                )}
               </div>
+
             </div>
           </div>
 
+          {/* Add/Edit modal */}
           <ModalAny
             isOpen={isModalOpen}
             onClose={() => {
               setIsModalOpen(false);
               setEditingProductId(null);
-              // On closing the modal, refresh the grid to reflect changes done inside the modal.
-              refreshProducts();
+              reloadAllData();
             }}
             onFirstImageUpload={() => {}}
             productId={editingProductId || undefined}
           />
+
+          {/* Change Existing Product modal */}
+          {isChangeExistingOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-gray-200">
+                <div className="p-4 border-b flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M12.9 14.32a8 8 0 111.414-1.414l4.387 4.387a1 1 0 01-1.414 1.414l-4.387-4.387zM14 8a6 6 0 11-12 0 6 6 0 0112 0z" clipRule="evenodd" />
+                      </svg>
+                    </span>
+                    <input
+                      value={changeSearch}
+                      onChange={(e) => { setChangeSearch(e.target.value); setChangeStage('top3'); }}
+                      placeholder="Search product…"
+                      className="w-full pl-10 pr-3 py-2 rounded-lg border focus:outline-none focus:ring-2 focus:ring-[#891F1A] text-black"
+                    />
+                  </div>
+
+                  <button
+                    onClick={() => { setIsChangeExistingOpen(false); setChangeSearch(''); setChangeStage('top3'); }}
+                    className="px-3 py-2 rounded-lg border hover:bg-gray-50 text-black"
+                    title="Close"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="p-4 max-h-[60vh] overflow-auto">
+                  {modalFiltered.length === 0 ? (
+                    <div className="text-center text-gray-500 italic py-8 text-black ">No matching products.</div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {modalFiltered.map((p) => {
+                        const img = p?.images?.[0]?.value || p?.image || '/img1.jpg';
+                        return (
+                          <li key={p.id} className="flex items-center justify-between gap-3 p-2 border rounded-lg hover:bg-gray-50">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <img src={img} alt={p.name} className="w-10 h-10 rounded object-cover border" />
+                              <div className="truncate">
+                                <div className="font-medium truncate text-black">{p.name}</div>
+                                <div className="text-xs text-gray-500 truncate text-black">ID: {p.id}</div>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => handleAddToSelectedSub(p)}
+                              disabled={!selectedSubcategoryId || isMapping === p.id}
+                              className={`w-9 h-9 rounded-full flex items-center justify-center border ${
+                                isMapping === p.id
+                                  ? 'bg-gray-200 cursor-wait'
+                                  : 'bg-white hover:bg-[#891F1A] hover:text-white text-[#891F1A] border-[#891F1A]'
+                              }`}
+                              title="Add to selected subcategory"
+                            >
+                              {isMapping === p.id ? (
+                                <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                                </svg>
+                              ) : (
+                                <span className="text-xl leading-none">+</span>
+                              )}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
+                {!changeSearch.trim() && (
+                  <div className="p-4 border-t flex justify-end">
+                    {changeStage === 'top3' && (
+                      <button
+                        onClick={() => setChangeStage('first25')}
+                        className="px-4 py-2 rounded bg-[#891F1A] text-white hover:opacity-90"
+                      >
+                        Show more
+                      </button>
+                    )}
+                    {changeStage === 'first25' && (
+                      <button
+                        onClick={() => setChangeStage('all')}
+                        className="px-4 py-2 rounded bg-[#891F1A] text-white hover:opacity-90"
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </AdminAuthGuard>

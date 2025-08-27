@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
@@ -45,18 +45,18 @@ const fallbackPosts = [
 ];
 
 export default function BlogPage() {
-  const [blogs, setBlogs] = useState([]);
+  const [blogs, setBlogs] = useState<any[]>([]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const keys = JSON.parse(localStorage.getItem("blogKeys") || "[]");
       const loaded = keys
-        .map((key) => {
+        .map((key: string) => {
           const item = localStorage.getItem(key);
           return item ? JSON.parse(item) : null;
         })
         .filter(Boolean)
-        .sort((a, b) => b.id - a.id);
+        .sort((a: any, b: any) => b.id - a.id);
       setBlogs(loaded.length > 0 ? loaded : fallbackPosts);
     }
   }, []);
@@ -65,17 +65,20 @@ export default function BlogPage() {
   const others = blogs.slice(0, -1).reverse(); // show newest at the top
 
   return (
-    <div className="flex flex-col bg-white">
+    <div
+      className="flex flex-col bg-white"
+      style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
+    >
       <Header />
       <MobileTopBar />
       <LogoSection />
       <Navbar />
 
       {/* Blog Section */}
-      <div className="px-4 md:px-12 lg:px-24 py-16 bg-white">
+      <main className="px-4 md:px-12 lg:px-24 py-16 bg-white">
         {/* Hero Article */}
         {featured && (
-          <div className="mb-10 flex flex-col md:flex-row gap-8">
+          <article className="mb-10 flex flex-col md:flex-row gap-8">
             <div className="w-full md:w-[500px] flex-shrink-0">
               <img
                 src={featured.thumbnail}
@@ -84,26 +87,30 @@ export default function BlogPage() {
               />
             </div>
             <div className="flex flex-col mt-6 md:mt-0">
-              <p className="text-sm uppercase text-[#891F1A] font-semibold mb-2">
+              {/* small → Light (300) */}
+              <small className="text-sm uppercase text-[#891F1A] font-light mb-2 tracking-wide">
                 Featured
-              </p>
+              </small>
+              {/* h1 → Bold (700) */}
               <h1 className="text-3xl font-bold text-gray-900 mb-4 leading-tight">
                 {featured.title}
               </h1>
-              <p className="text-gray-600 text-sm md:text-base mb-4 line-clamp-[8]">
+              {/* p → Regular (400) */}
+              <p className="text-gray-600 text-sm md:text-base mb-4 line-clamp-[8] font-normal">
                 {featured.metaDescription || featured.description}
               </p>
-              <button className="self-start bg-[#891F1A] text-white text-sm px-5 py-2 rounded-md hover:bg-[#701912] transition-all duration-200">
+              {/* button → Medium (500) */}
+              <button className="self-start bg-[#891F1A] text-white text-sm px-5 py-2 rounded-md hover:bg-[#701912] transition-all duration-200 font-medium">
                 Show more →
               </button>
             </div>
-          </div>
+          </article>
         )}
 
         {/* Blog Grid */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+        <section className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           {others.map((post: any) => (
-            <div
+            <article
               key={post.id}
               className="relative rounded-xl overflow-hidden h-[320px] group shadow-md bg-cover bg-center"
               style={{ backgroundImage: `url(${post.thumbnail})` }}
@@ -112,18 +119,23 @@ export default function BlogPage() {
             >
               <div className="absolute inset-0 bg-black/30 group-hover:bg-black/40 transition-all duration-300" />
               <div className="absolute bottom-0 p-5 text-white z-10">
+                {/* chip → Medium (500) is fine for emphasis, but keep small sizing */}
                 <span className="inline-block bg-white/80 text-black text-xs font-medium px-3 py-1 rounded-full mb-3">
                   {post.category || "General"}
                 </span>
-                <h3 className="text-lg font-semibold leading-tight mb-2">{post.title}</h3>
-                <p className="text-sm text-white/90">
+                {/* h3 → Medium (500) */}
+                <h3 className="text-lg font-medium leading-tight mb-2">
+                  {post.title}
+                </h3>
+                {/* p → Regular (400) */}
+                <p className="text-sm text-white/90 font-normal">
                   {post.metaDescription || post.description}
                 </p>
               </div>
-            </div>
+            </article>
           ))}
-        </div>
-      </div>
+        </section>
+      </main>
 
       <Footer />
     </div>

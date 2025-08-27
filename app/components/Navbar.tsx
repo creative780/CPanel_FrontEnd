@@ -123,121 +123,165 @@ export default function Navbar() {
   if (loading || !navItemsData.length) return null;
 
   return (
-    <nav className="w-full bg-white border-b border-gray-200 m-0 min-h-[68px] md:min-h-[80px] flex items-center">
-      {/* Mobile Toggle */}
-      <div className="flex py-3 px-2 md:hidden">
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="p-2 rounded-md text-gray-700 hover:bg-gray-100"
-          aria-label="Toggle navigation"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2}>
-            {mobileOpen ? (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-            )}
-          </svg>
-        </button>
-      </div>
-
-      {/* Navigation Links */}
-      <div className={`${mobileOpen ? "flex flex-col py-2 space-y-1" : "hidden"} md:flex md:justify-center w-full`}>
-        <div className="flex flex-wrap flex-col md:flex-row gap-[clamp(0.35rem,0.6vw,1rem)] py-2 md:py-3">
-          {navItemsData.map((item, idx) => (
-            <div
-              key={item.id || idx}
-              className="relative"
-              onMouseEnter={() => handleNavEnter(idx)}
-              onMouseLeave={handleNavLeave}
-            >
-              <Link
-                href={item.url || "#"}
-                className={`block text-center whitespace-nowrap overflow-ellipsis max-w-[20vw] md:max-w-none transition-colors ${
-                  openIndex === idx ? "text-red-600" : "text-gray-800 hover:text-red-600"
-                }`}
-                style={{
-                  fontSize: "clamp(0.7rem, 1.1vw, 0.95rem)",
-                  padding: "clamp(0.4rem, 0.7vw, 0.75rem) clamp(0.6rem, 0.9vw, 1rem)", // taller bar
-                }}
-                onClick={() => setMobileOpen(false)}
-              >
-                {item.label}
-              </Link>
-            </div>
-          ))}
+    <div style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}>
+      <nav
+        className="w-full bg-white border-b border-gray-200 m-0 min-h-[68px] md:min-h-[80px] flex items-center font-medium"
+        aria-label="Primary"
+        role="navigation"
+      >
+        {/* Mobile Toggle */}
+        <div className="flex py-3 px-2 md:hidden">
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="p-2 rounded-md text-gray-700 hover:bg-gray-100 font-medium"
+            aria-label="Toggle navigation"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2}>
+              {mobileOpen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              )}
+            </svg>
+          </button>
         </div>
-      </div>
 
-      {/* Dropdown Content */}
-      {openIndex !== null && navItemsData[openIndex]?.dropdownContent && (
-        <div
-          onMouseEnter={handleDropdownEnter}
-          onMouseLeave={handleDropdownLeave}
-          className={`fixed left-1/2 top-[200px] -translate-x-1/2 z-50 w-full max-w-[1400px] px-2 transition-all duration-300 ease-out ${
-            dropdownVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
-          }`}
-        >
-          <div className="bg-white/70 backdrop-blur-md border-2 rounded-xl shadow-xl flex flex-col md:flex-row p-4 md:p-8 space-y-4 md:space-y-0 md:space-x-0 min-h-[340px]">
-            {/* Left Column */}
-            <div
-              className="w-full md:w-auto md:min-w-[180px] border-b md:border-b-0 md:border-r-2 border-gray-500 border-opacity-10 pr-4 mr-3"
-              // Leaving the left rail resets to subcategory thumbnails
-              onMouseLeave={() => setHoveredSubForProducts(null)}
-            >
-              <h3 className="text-base font-bold mb-2 text-black">
-                {navItemsData[openIndex].dropdownContent.title}
-              </h3>
-              <div className="flex flex-col gap-1">
-                {navItemsData[openIndex].dropdownContent.columns?.map((col: any, colIdx: number) => (
-                  <Link
-                    key={colIdx}
-                    href={col.url || "#"}
-                    className={`${getDropdownItemColorClass(col.color || "black")} text-sm py-1 hover:underline`}
-                    onMouseEnter={(e) => {
-                      // Hover = show product grid for this subcategory
-                      setHoveredSubForProducts(col.label);
-                    }}
-                    onClick={() => {
-                      // Keep default navigation on click for desktop users who want to go
-                      setMobileOpen(false);
-                    }}
-                  >
-                    {col.label}
-                  </Link>
-                ))}
+        {/* Navigation Links */}
+        <div className={`${mobileOpen ? "flex flex-col py-2 space-y-1" : "hidden"} md:flex md:justify-center w-full`}>
+          <div className="flex flex-wrap flex-col md:flex-row gap-[clamp(0.35rem,0.6vw,1rem)] py-2 md:py-3">
+            {navItemsData.map((item, idx) => (
+              <div
+                key={item.id || idx}
+                className="relative"
+                onMouseEnter={() => handleNavEnter(idx)}
+                onMouseLeave={handleNavLeave}
+              >
+                {/* a/nav items → Medium (500) */}
+                <Link
+                  href={item.url || "#"}
+                  className={`block text-center whitespace-nowrap overflow-ellipsis max-w-[20vw] md:max-w-none transition-colors ${
+                    openIndex === idx ? "text-red-600" : "text-gray-800 hover:text-red-600"
+                  } font-medium`}
+                  style={{
+                    fontSize: "clamp(0.7rem, 1.1vw, 0.95rem)",
+                    padding: "clamp(0.4rem, 0.7vw, 0.75rem) clamp(0.6rem, 0.9vw, 1rem)",
+                  }}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  {item.label}
+                </Link>
               </div>
-            </div>
+            ))}
+          </div>
+        </div>
 
-            {/* Right Column */}
-            <div className="w-full md:w-[86%] pl-3">
-              {(() => {
-                const catTitle = navItemsData[openIndex].dropdownContent.title;
-                const category = getCategoryByTitle(catTitle);
-                const subs = category?.subcategories || [];
+        {/* Dropdown Content */}
+        {openIndex !== null && navItemsData[openIndex]?.dropdownContent && (
+          <section
+            onMouseEnter={handleDropdownEnter}
+            onMouseLeave={handleDropdownLeave}
+            className={`fixed left-1/2 top-[200px] -translate-x-1/2 z-50 w-full max-w-[1400px] px-2 transition-all duration-300 ease-out ${
+              dropdownVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+            }`}
+            aria-label="Category mega menu"
+          >
+            <div className="bg-white/70 backdrop-blur-md border-2 rounded-xl shadow-xl flex flex-col md:flex-row p-4 md:p-8 space-y-4 md:space-y-0 md:space-x-0 min-h-[340px]">
+              {/* Left Column */}
+              <aside
+                className="w-full md:w-auto md:min-w-[180px] border-b md:border-b-0 md:border-r-2 border-gray-500 border-opacity-10 pr-4 mr-3"
+                onMouseLeave={() => setHoveredSubForProducts(null)}
+                aria-label="Subcategories"
+              >
+                {/* h2 → Semi Bold (600) */}
+                <h2 className="text-base font-semibold mb-2 text-black">
+                  {navItemsData[openIndex].dropdownContent.title}
+                </h2>
+                <ul className="flex flex-col gap-1">
+                  {navItemsData[openIndex].dropdownContent.columns?.map((col: any, colIdx: number) => (
+                    <li key={colIdx}>
+                      {/* nav item link → Medium (500) */}
+                      <Link
+                        href={col.url || "#"}
+                        className={`${getDropdownItemColorClass(col.color || "black")} text-sm py-1 hover:underline font-medium`}
+                        onMouseEnter={() => setHoveredSubForProducts(col.label)}
+                        onClick={() => setMobileOpen(false)}
+                      >
+                        {col.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
 
-                // If hovering a subcategory, show its first 16 products (first image only)
-                if (hoveredSubForProducts) {
-                  const sub = subs.find((s: any) => s.name === hoveredSubForProducts);
-                  const products: any[] = sub?.products || [];
-                  const first16 = products.slice(0, 16);
+              {/* Right Column */}
+              <div className="w-full md:w-[86%] pl-3">
+                {(() => {
+                  const catTitle = navItemsData[openIndex].dropdownContent.title;
+                  const category = getCategoryByTitle(catTitle);
+                  const subs = category?.subcategories || [];
+
+                  if (hoveredSubForProducts) {
+                    const sub = subs.find((s: any) => s.name === hoveredSubForProducts);
+                    const products: any[] = sub?.products || [];
+                    const first16 = products.slice(0, 16);
+
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2" role="list">
+                        {first16.map((prod: any, i: number) => {
+                          const img = prod?.images?.[0];
+                          const imgUrl = img?.url || "https://i.ibb.co/ynT1dLc/image-not-found.png";
+                          const imgAlt = img?.alt_text || prod?.name || "Product";
+                          const href = buildProductHref(category, sub, prod);
+
+                          return (
+                            <Link
+                              key={i}
+                              href={href || "#"}
+                              className="w-[120px] mx-auto"
+                              onClick={() => setMobileOpen(false)}
+                            >
+                              <figure className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center">
+                                <img
+                                  src={imgUrl}
+                                  alt={imgAlt}
+                                  loading="lazy"
+                                  className="object-cover w-full h-full rounded-md"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.onerror = null;
+                                    target.src = "https://i.ibb.co/ynT1dLc/image-not-found.png";
+                                  }}
+                                />
+                              </figure>
+                              <div className="mt-1 text-center">
+                                {/* product name → Regular (400) */}
+                                <p className="text-xs font-normal text-gray-900 line-clamp-2">
+                                  {prod?.name}
+                                </p>
+                              </div>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
 
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
-                      {first16.map((prod: any, i: number) => {
-                        const img = prod?.images?.[0];
-                        const imgUrl = img?.url || "https://i.ibb.co/ynT1dLc/image-not-found.png";
-                        const imgAlt = img?.alt_text || prod?.name || "Product";
-                        const href = buildProductHref(category, sub, prod);
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2" role="list">
+                      {subs.map((sub: any, i: number) => {
+                        const subImage = sub?.images?.[0];
+                        const imgUrl = subImage?.url || "https://i.ibb.co/ynT1dLc/image-not-found.png";
+                        const imgAlt = subImage?.alt_text || sub?.name || "Image";
+                        const subHref = `/home/${category?.url}/${sub?.url}`;
 
                         return (
                           <Link
                             key={i}
-                            href={href || "#"}
+                            href={subHref || "#"}
                             className="w-[120px] mx-auto"
                             onClick={() => setMobileOpen(false)}
                           >
-                            <div className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center">
+                            <figure className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center">
                               <img
                                 src={imgUrl}
                                 alt={imgAlt}
@@ -249,61 +293,22 @@ export default function Navbar() {
                                   target.src = "https://i.ibb.co/ynT1dLc/image-not-found.png";
                                 }}
                               />
-                            </div>
+                            </figure>
                             <div className="mt-1 text-center">
-                              <div className="text-xs font-medium text-gray-900 line-clamp-2">
-                                {prod?.name}
-                              </div>
+                              {/* subcategory label → Medium (500) */}
+                              <span className="text-xs font-medium text-gray-900">{sub?.name}</span>
                             </div>
                           </Link>
                         );
                       })}
                     </div>
                   );
-                }
-
-                // Default (no hover): show one tile per subcategory (as before)
-                return (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-2">
-                    {subs.map((sub: any, i: number) => {
-                      const subImage = sub?.images?.[0];
-                      const imgUrl = subImage?.url || "https://i.ibb.co/ynT1dLc/image-not-found.png";
-                      const imgAlt = subImage?.alt_text || sub?.name || "Image";
-                      const subHref = `/home/${category?.url}/${sub?.url}`;
-
-                      return (
-                        <Link
-                          key={i}
-                          href={subHref || "#"}
-                          className="w-[120px] mx-auto"
-                          onClick={() => setMobileOpen(false)}
-                        >
-                          <div className="w-[120px] h-[120px] rounded-md overflow-hidden flex items-center justify-center">
-                            <img
-                              src={imgUrl}
-                              alt={imgAlt}
-                              loading="lazy"
-                              className="object-cover w-full h-full rounded-md"
-                              onError={(e) => {
-                                const target = e.target as HTMLImageElement;
-                                target.onerror = null;
-                                target.src = "https://i.ibb.co/ynT1dLc/image-not-found.png";
-                              }}
-                            />
-                          </div>
-                          <div className="mt-1 text-center">
-                            <div className="text-xs font-medium text-gray-900">{sub?.name}</div>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
+                })()}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
-    </nav>
+          </section>
+        )}
+      </nav>
+    </div>
   );
 }

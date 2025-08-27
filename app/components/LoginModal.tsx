@@ -130,13 +130,11 @@ const LoginModal: React.FC<LoginModalProps> = ({
           const result = await createUserWithEmailAndPassword(auth, email, password);
           userId = result.user.uid;
 
-          // Save to Firebase Firestore
           await saveUserToFirestore({ user_id: userId, name, email });
         } catch (firebaseError) {
           console.warn("Firebase signup failed. Continuing with backend fallback...");
         }
 
-        // Check if user exists in Django backend
         const usersRes = await fetch(
           `${API_BASE_URL}/api/show-user/`,
           withFrontendKey()
@@ -149,7 +147,6 @@ const LoginModal: React.FC<LoginModalProps> = ({
           throw new Error("Duplicate email");
         }
 
-        // Save to backend regardless
         await saveUserToBackend({
           user_id: userId || `local-${Date.now()}`,
           email,
@@ -195,10 +192,11 @@ const LoginModal: React.FC<LoginModalProps> = ({
         ? "text-white placeholder-white border-white bg-transparent md:text-black md:placeholder-gray-500 md:border-gray-300 md:bg-white"
         : "text-black placeholder-gray-500 border-gray-300 bg-white"
     }`;
-    
+
   return (
     <div
       id="authModal"
+      style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
       className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center px-4"
       onClick={(e) => {
         if ((e.target as HTMLElement).id === "authModal") onClose();
@@ -210,17 +208,20 @@ const LoginModal: React.FC<LoginModalProps> = ({
       <div className="w-full max-w-[860px] rounded-[20px] overflow-hidden bg-white flex flex-col md:flex-row shadow-[0_0_30px_rgba(0,0,0,0.2)]">
         {/* Left Panel */}
         <div className="hidden md:flex md:flex-1 bg-[#891f1a] text-white p-10 flex-col justify-center items-center text-center">
-          <h2 id="auth-heading" className="text-[26px] font-bold mb-5">
+          {/* h2 → Semi Bold (600) */}
+          <h2 id="auth-heading" className="text-[26px] font-semibold mb-5">
             {isSignup ? "Welcome Back!" : "Hello, Friend!"}
           </h2>
-          <p className="text-sm mb-5">
+          {/* p → Regular (400) */}
+          <p className="text-sm font-normal mb-5">
             {isSignup
               ? "To keep connected with us please login with your personal info"
               : "Enter your personal details and start your journey with us"}
           </p>
+          {/* button → Medium (500) */}
           <button
             onClick={toggleMode}
-            className="bg-white text-black font-semibold px-6 py-3 rounded-full text-base"
+            className="bg-white text-black font-medium px-6 py-3 rounded-full text-base"
           >
             {isSignup ? "SIGN IN" : "SIGN UP"}
           </button>
@@ -234,10 +235,12 @@ const LoginModal: React.FC<LoginModalProps> = ({
               : "bg-white text-black"
           }`}
         >
-          <h2 className="text-[22px] md:text-[26px] font-bold mb-4 md:mb-5">
+          {/* h2 → Semi Bold (600) */}
+          <h2 className="text-[22px] md:text-[26px] font-semibold mb-4 md:mb-5">
             {isSignup ? "Create Account 🚀" : "Sign In 👋"}
           </h2>
-          <p className="text-sm mb-4 md:mb-5">
+          {/* p → Regular (400) */}
+          <p className="text-sm font-normal mb-4 md:mb-5">
             {isSignup
               ? "or use your email for registration"
               : "or use your account"}
@@ -274,7 +277,7 @@ const LoginModal: React.FC<LoginModalProps> = ({
           {!isSignup && (
             <button
               onClick={handleGoogleLogin}
-              className="cursor-pointer flex items-center justify-center gap-2 w-full px-4 py-3 mb-4 border border-gray-300 rounded-full hover:bg-gray-100 transition"
+              className="cursor-pointer flex items-center justify-center gap-2 w-full px-4 py-3 mb-4 border border-gray-300 rounded-full hover:bg-gray-100 transition font-medium"
               aria-label="Sign in with Google"
             >
               <img
@@ -288,22 +291,24 @@ const LoginModal: React.FC<LoginModalProps> = ({
                   e.currentTarget.src = "/images/default.jpg";
                 }}
               />
-              <span className="text-sm font-medium text-black">
+              {/* span → Regular (400) */}
+              <span className="text-sm font-normal text-black">
                 Sign in with Google
               </span>
             </button>
           )}
 
+          {/* button → Medium (500) */}
           <button
             onClick={handleAuth}
-            className="bg-[#ff5858] hover:bg-[#e94b4b] transition text-white font-semibold px-6 py-3 rounded-full text-base mb-3 w-full"
+            className="bg-[#ff5858] hover:bg-[#e94b4b] transition text-white font-medium px-6 py-3 rounded-full text-base mb-3 w-full"
           >
             {isSignup ? "SIGN UP" : "SIGN IN"}
           </button>
 
           <button
             onClick={toggleMode}
-            className="bg-white text-black font-semibold px-6 py-3 rounded-full text-sm md:text-base block md:hidden"
+            className="bg-white text-black font-medium px-6 py-3 rounded-full text-sm md:text-base block md:hidden"
           >
             {isSignup
               ? "Already have an account? SIGN IN"

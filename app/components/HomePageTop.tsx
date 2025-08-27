@@ -6,7 +6,7 @@ import Image from 'next/image';
 import LoginModal from '../components/LoginModal';
 import { API_BASE_URL } from '../utils/api';
 
-/** FRONTEND KEY helper (adds header X-Frontend-Key) — same as LogoSection */
+/** FRONTEND KEY helper (adds header X-Frontend-Key) */
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
@@ -14,33 +14,7 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-/* ===================== API TYPES (from your backend response) =====================
-
-Response: Array<CategoryRaw>
-CategoryRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string,
-  subcategories: Array<SubcategoryRaw>
-}
-
-SubcategoryRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string,
-  products: Array<ProductRaw>
-}
-
-ProductRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string
-}
-===================================================================================*/
-
+/* ===================== API TYPES ===================== */
 type ID = string | number;
 
 interface ProductRaw {
@@ -92,7 +66,7 @@ export default function MobileTopBar() {
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
 
-  // ======= Search (port from LogoSection) =======
+  // ======= Search =======
   const [navData, setNavData] = useState<CategoryRaw[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -209,8 +183,11 @@ export default function MobileTopBar() {
     setExpandedCategory(prev => (prev === name ? null : name));
   };
 
-  const slugify = useCallback((str: string) =>
-    str.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, ''), []);
+  // Slugify
+  const slugify = useCallback(
+    (str: string) => str.toLowerCase().trim().replace(/\s+/g, '-'),
+    []
+  );
 
   const openModal = (mode: 'signin' | 'signup') => {
     setModalMode(mode);
@@ -233,7 +210,6 @@ export default function MobileTopBar() {
 
   /* =============================== Derivations =============================== */
 
-  // Flatten for lookup + scoring (same as LogoSection)
   const { cats, subs, prods } = useMemo(() => {
     const cats: Cat[] = [];
     const subs: Sub[] = [];
@@ -484,18 +460,17 @@ export default function MobileTopBar() {
   const onChipClick = (text: string) => {
     setSearchQuery(text);
     setShowSearch(true);
-    // focus the input for quick refinement
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
-  // Helper to safely get URL or slug fallback
   const safeUrl = (url: string | undefined, fallback: string) => (url && url.trim().length > 0 ? url : fallback);
 
   return (
-    <>
+    // Force Poppins regardless of global config
+    <div style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}>
       {/* Mobile Top Bar */}
       <div className="md:hidden flex items-center justify-between p-4 bg-[#891F1A] text-white fixed top-0 left-0 right-0 z-30">
-        <button onClick={() => setIsMenuOpen(true)} aria-label="Open menu">
+        <button onClick={() => setIsMenuOpen(true)} aria-label="Open menu" className="font-medium">
           <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
           </svg>
@@ -510,6 +485,7 @@ export default function MobileTopBar() {
             className="h-8 w-auto object-contain"
           />
         </div>
+        {/* phone → nav text: Medium (500) */}
         <div className="text-sm font-medium">+971-123-456-789</div>
       </div>
 
@@ -527,15 +503,16 @@ export default function MobileTopBar() {
         className={`fixed top-0 right-0 h-full bg-white text-black z-50 transition-transform duration-300 ease-in-out shadow-2xl w-3/5 max-w-xs transform ${
           isMenuOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
+        aria-label="Mobile menu"
       >
         <div className="flex flex-col h-full overflow-y-auto">
-          <button onClick={() => setIsMenuOpen(false)} className="self-end p-4" aria-label="Close menu">
+          <button onClick={() => setIsMenuOpen(false)} className="self-end p-4 font-medium" aria-label="Close menu">
             <svg className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
 
-          {/* Search (upgraded to match LogoSection) */}
+          {/* Search */}
           <div className="px-4 mb-3" ref={searchWrapRef}>
             <div
               className="relative"
@@ -551,7 +528,7 @@ export default function MobileTopBar() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setShowSearch(true)}
                 placeholder={loading ? 'Loading items…' : 'Type to explore...'}
-                className="w-full py-2 pl-10 pr-4 border rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400 text-black"
+                className="w-full py-2 pl-10 pr-4 border rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400 text-black font-normal"
                 aria-label="Search"
                 disabled={loading}
               />
@@ -567,12 +544,12 @@ export default function MobileTopBar() {
                 role="listbox"
                 aria-label="Search suggestions"
               >
-                <div className="px-3 pt-2 text-[11px] text-gray-500">
+                <p className="px-3 pt-2 text-[11px] text-gray-500 font-light">
                   {loading && 'Fetching catalog…'}
                   {!loading && !error && quickBadges.length > 0 && 'Quick categories:'}
                   {!loading && !error && quickBadges.length === 0 && 'No categories found.'}
-                  {error && <span className="text-red-600">{error}</span>}
-                </div>
+                  {error && <span className="text-red-600 font-normal">{error}</span>}
+                </p>
 
                 {quickBadges.length > 0 && (
                   <div className="px-3 pb-2 pt-1 flex flex-wrap gap-2 border-b border-gray-100">
@@ -580,7 +557,7 @@ export default function MobileTopBar() {
                       <button
                         key={b}
                         type="button"
-                        className="text-[11px] rounded-full px-2.5 py-1 transition text-white bg-[#8B1C1C] hover:bg-[#6f1414]"
+                        className="text-[11px] rounded-full px-2.5 py-1 transition text-white bg-[#8B1C1C] hover:bg-[#6f1414] font-medium"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           onChipClick(b);
@@ -594,11 +571,11 @@ export default function MobileTopBar() {
 
                 {debouncedQuery && didYouMean.length > 0 && (
                   <div className="px-3 py-2 text-[11px] text-gray-600 border-b border-gray-100">
-                    Did you mean:{' '}
+                    <span className="font-light">Did you mean: </span>
                     {didYouMean.map((s, i) => (
                       <button
                         key={s + i}
-                        className="underline decoration-dotted mr-2 hover:text-[#8B1C1C]"
+                        className="underline decoration-dotted mr-2 hover:text-[#8B1C1C] font-medium"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           setSearchQuery(s);
@@ -618,9 +595,10 @@ export default function MobileTopBar() {
                           if (it.kind === 'header') {
                             return (
                               <li key={it.key} className="py-1 bg-white text-black sticky top-0 z-10">
-                                <div className="px-3 py-1 text-[11px] font-semibold uppercase text-red-700">
+                                {/* h3 → Medium (500) but visually small */}
+                                <h3 className="px-3 py-1 text-[11px] font-medium uppercase text-red-700">
                                   {it.text}
-                                </div>
+                                </h3>
                               </li>
                             );
                           }
@@ -631,7 +609,7 @@ export default function MobileTopBar() {
                                   {it.chips.map((c, idx) => (
                                     <button
                                       key={c.text + idx}
-                                      className="text-[11px] rounded-full px-2.5 py-1 bg-gray-100 hover:bg-gray-200"
+                                      className="text-[11px] rounded-full px-2.5 py-1 bg-gray-100 hover:bg-gray-200 font-medium"
                                       onMouseDown={(e) => {
                                         e.preventDefault();
                                         onChipClick(c.text);
@@ -662,12 +640,14 @@ export default function MobileTopBar() {
                                     height={48}
                                   />
                                   <div className="min-w-0 flex-1">
+                                    {/* product name → Medium (500) */}
                                     <span className="block font-medium text-sm text-gray-900 truncate">
                                       {p.name}
                                     </span>
-                                    <p className="text-[11px] text-gray-600">
+                                    {/* meta → small Light (300) */}
+                                    <small className="text-[11px] text-gray-600 font-light">
                                       {p.subName} • <span className="text-gray-500">{p.catName}</span>
-                                    </p>
+                                    </small>
                                   </div>
                                 </div>
                               </Link>
@@ -676,37 +656,47 @@ export default function MobileTopBar() {
                         })}
                       </ul>
                     ) : (
-                      <div className="px-3 py-5 text-sm text-gray-500">
+                      <p className="px-3 py-5 text-sm text-gray-500 font-normal">
                         No matches for “{searchQuery}”. Try another keyword.
-                      </div>
+                      </p>
                     )}
                   </div>
                 ) : (
-                  <div className="px-3 py-3 text-[11px] text-gray-500">
-                    Start typing a <span className="font-semibold text-red-700">Category</span>,
-                    <span className="font-semibold text-red-700"> Subcategory</span>, or a
-                    <span className="font-semibold text-red-700"> Product</span>.
-                  </div>
+                  <p className="px-3 py-3 text-[11px] text-gray-500 font-light">
+                    Start typing a <strong className="font-bold text-red-700">Category</strong>,
+                    <strong className="font-bold text-red-700"> Subcategory</strong>, or a
+                    <strong className="font-bold text-red-700"> Product</strong>.
+                  </p>
                 )}
               </div>
             )}
           </div>
 
-          {/* Categories (driven by navData; uses API url when available) */}
-          <nav className="border-b border-gray-300 pb-4 px-4">
+          {/* Categories */}
+          <nav className="border-b border-gray-300 pb-4 px-4" aria-label="Mobile categories">
+            {/* h2 → Semi Bold (600) */}
             <h2 className="text-base font-semibold mb-2">Categories</h2>
             <ul className="space-y-2">
               {navData.map((cat) => {
                 const catSlug = slugify(cat.name);
-                const catUrl = safeUrl(cat.url, `/home/${catSlug}`);
+                const catUrl = `/home/${catSlug}`;
                 return (
                   <li key={String(cat.id)}>
                     <div className="flex justify-between items-center">
-                      <Link href={catUrl} className="font-medium hover:text-red-700" onClick={() => setIsMenuOpen(false)}>
+                      {/* a (nav link) → Medium (500) */}
+                      <Link
+                        href={catUrl}
+                        className="font-medium hover:text-red-700"
+                        onClick={() => setIsMenuOpen(false)}
+                      >
                         {cat.name}
                       </Link>
                       {cat.subcategories?.length > 0 && (
-                        <button onClick={() => toggleCategory(cat.name)} aria-label="Toggle subcategories">
+                        <button
+                          onClick={() => toggleCategory(cat.name)}
+                          aria-label="Toggle subcategories"
+                          className="font-medium"
+                        >
                           <svg
                             className={`w-4 h-4 transition-transform ${expandedCategory === cat.name ? 'rotate-180' : ''}`}
                             fill="none"
@@ -721,15 +711,12 @@ export default function MobileTopBar() {
                     {expandedCategory === cat.name && (
                       <ul className="mt-1 pl-4 space-y-1 text-sm text-gray-700">
                         {cat.subcategories?.map((sub) => {
-                          const subUrl = safeUrl(
-                            sub.url,
-                            `/home/${catSlug}/${slugify(sub.name)}`
-                          );
+                          const subUrl = `/home/${catSlug}/${slugify(sub.name)}`;
                           return (
                             <li key={String(sub.id)}>
                               <Link
                                 href={subUrl}
-                                className="hover:underline"
+                                className="hover:underline font-medium"
                                 onClick={() => setIsMenuOpen(false)}
                               >
                                 {sub.name}
@@ -746,18 +733,23 @@ export default function MobileTopBar() {
           </nav>
 
           {/* Info and Actions */}
-          <div className="flex flex-col space-y-3 px-4 py-4 text-sm">
-            <div><span className="font-medium">Email:</span> hi@printshop.com</div>
-            <Link href="/home" className="hover:text-gray-700" onClick={() => setIsMenuOpen(false)}>Home</Link>
-            <Link href="/about" className="hover:text-gray-700" onClick={() => setIsMenuOpen(false)}>About</Link>
-            <Link href="/checkout2" className="hover:text-gray-700" onClick={() => setIsMenuOpen(false)}>View Cart</Link>
-            <Link href="/blog" className="hover:text-gray-700" onClick={() => setIsMenuOpen(false)}>Blog</Link>
-            <Link href="/contact" className="hover:text-gray-700" onClick={() => setIsMenuOpen(false)}>Contact</Link>
-            <div>UAE</div>
+          <section className="flex flex-col space-y-3 px-4 py-4 text-sm">
+            {/* label text → Regular (400) */}
+            <p className="font-normal">
+              <span className="font-medium">Email:</span> hi@printshop.com
+            </p>
+            {/* Primary nav links → Medium (500) */}
+            <Link href="/home" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Home</Link>
+            <Link href="/about" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>About</Link>
+            <Link href="/checkout2" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>View Cart</Link>
+            <Link href="/blog" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Blog</Link>
+            <Link href="/contact" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Contact</Link>
+            {/* location → small Light (300) */}
+            <small className="font-light">UAE</small>
 
             <div className="login-signup">
               {!user ? (
-                <button onClick={() => openModal('signin')} className="flex items-center py-1.5 w-full">
+                <button onClick={() => openModal('signin')} className="flex items-center py-1.5 w-full font-medium">
                   <Image
                     src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
                     alt="Login"
@@ -778,11 +770,12 @@ export default function MobileTopBar() {
                     loading="lazy"
                     className="mr-2"
                   />
-                  <span className="text-sm text-black">{username}</span>
+                  {/* username → Regular (400) */}
+                  <span className="text-sm text-black font-normal">{username}</span>
                 </div>
               )}
             </div>
-          </div>
+          </section>
         </div>
       </aside>
 
@@ -797,6 +790,6 @@ export default function MobileTopBar() {
         onAuth={handleAuth}
         toggleMode={toggleModalMode}
       />
-    </>
+    </div>
   );
 }

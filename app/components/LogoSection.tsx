@@ -438,7 +438,7 @@ export default function LogoSection() {
       const subProds = prods.filter((p) => p.subId === sub.id);
       subProds.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
 
-      // Secondary: rest products in same category (after scroll, handled by loadedCount)
+      // Secondary: rest products in same category
       const catRemainder = prods.filter((p) => p.catId === sub.catId && p.subId !== sub.id);
       catRemainder.forEach((p) => items.push({ kind: "product", key: `p2-${p.id}`, prod: p }));
 
@@ -461,10 +461,7 @@ export default function LogoSection() {
 
       // Subcategory products first; ensure hit product appears first
       const subProds = prods.filter((p) => p.subId === prodHit.subId);
-      const sortedSubProds = [
-        prodHit,
-        ...subProds.filter((p) => p.id !== prodHit.id),
-      ];
+      const sortedSubProds = [prodHit, ...subProds.filter((p) => p.id !== prodHit.id)];
       sortedSubProds.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
 
       // Then remainder of category
@@ -476,9 +473,8 @@ export default function LogoSection() {
       return items;
     }
 
-    // Broad fallback: rank products broadly by fuzzy score and group under headers when rendered
+    // Broad fallback
     const scored = topMatches(prods, debouncedQuery, 0.45, 200);
-    // Group them by category in output order
     const grouped = new Map<ID, { catName: string; items: Prod[] }>();
     for (const { item } of scored) {
       if (!grouped.has(item.catId)) grouped.set(item.catId, { catName: item.catName, items: [] });
@@ -486,7 +482,6 @@ export default function LogoSection() {
     }
     for (const [catId, group] of grouped.entries()) {
       items.push({ kind: "header", key: `cat-${String(catId)}`, text: group.catName });
-      // optional: chips of that category
       const subOfCat = subs.filter((s) => s.catId === catId);
       if (subOfCat.length) {
         items.push({
@@ -500,19 +495,18 @@ export default function LogoSection() {
     return items;
   }, [debouncedQuery, intent, prods, subs]);
 
-  // “Did you mean” line (only if we didn’t get a confident direct intent)
+  // “Did you mean” line
   const didYouMean = useMemo(() => {
     if (!debouncedQuery) return [];
     if (intent.type === "broad") {
       return intent.suggestions.map((s) => s.item.name);
     }
-    // Still useful if we had intent but other close candidates exist:
     const extras =
       intent.suggestions?.map((s: any) => s.item.name).filter((n: string) => !!n) || [];
     return extras.slice(0, 3);
   }, [intent, debouncedQuery]);
 
-  // Filter visible items by loadedCount (infinite-ish)
+  // Visible items by loadedCount
   const visibleItems = useMemo(() => {
     const list: ViewItem[] = [];
     let count = 0;
@@ -526,14 +520,16 @@ export default function LogoSection() {
     return list;
   }, [viewItems, loadedCount]);
 
-  // When a chip is clicked, we treat it as a new query
   const onChipClick = (text: string) => {
     setSearchQuery(text);
   };
 
   return (
     <>
-      <div className="flex-col sm:flex-col lg:flex-row bg-white gap-8 items-start sm:items-start lg:items-center px-4 sm:px-6 lg:px-24 py-4 hidden md:flex">
+      <div
+        style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
+        className="flex-col sm:flex-col lg:flex-row bg-white gap-8 items-start sm:items-start lg:items-center px-4 sm:px-6 lg:px-24 py-4 hidden md:flex"
+      >
         <div className="flex flex-row flex-wrap w-full lg:w-[80%] gap-8 items-center">
           <Link href="/home">
             <img
@@ -552,32 +548,34 @@ export default function LogoSection() {
                 searchInputRef.current?.focus();
               }}
             >
+              {/* input → 400 */}
               <input
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setShowSearch(true)}
                 placeholder={loading ? "Loading items…" : "Type to explore..."}
-                className="flex-1 bg-transparent outline-none text-sm lg:text-base text-[#0E0E0E] placeholder:text-[#0E0E0E] placeholder:opacity-70"
+                className="flex-1 bg-transparent outline-none text-sm lg:text-base text-[#0E0E0E] placeholder:text-[#0E0E0E] placeholder:opacity-70 font-normal"
                 aria-label="Search"
                 disabled={loading}
               />
 
               <img
-                src="https://img.icons8.com/?size=100&id=118834&format=png&color=000000"
+                src="https://img.icons8.com/?size=100&id=Y6AAeSVIcpWt&format=png&color=000000"
                 alt=""
                 width={1}
                 height={40}
                 className="w-px h-8 sm:h-10 hidden sm:block"
               />
+              {/* button → 500 */}
               <button
                 type="button"
-                className="shrink-0"
+                className="shrink-0 font-medium"
                 aria-label="Search"
                 onMouseDown={(e) => e.preventDefault()}
               >
                 <img
-                  src="https://img.icons8.com/?size=100&id=DZe3wFKTc8IK&format=png&color=000000"
+                  src="https://img.icons8.com/?size=100&id=Y6AAeSVIcpWt&format=png&color=000000"
                   alt="Search icon"
                   width={20}
                   height={20}
@@ -593,8 +591,8 @@ export default function LogoSection() {
                 role="listbox"
                 aria-label="Search suggestions"
               >
-                {/* Status / badges header */}
-                <div className="px-4 pt-3 text-xs text-gray-500">
+                {/* Status / badges header (acts like a minor heading → keep 600) */}
+                <div className="px-4 pt-3 text-xs text-gray-500 font-light">
                   {loading && "Fetching catalog…"}
                   {!loading && !error && quickBadges.length > 0 && "Quick categories:"}
                   {!loading && !error && quickBadges.length === 0 && "No categories found."}
@@ -604,11 +602,12 @@ export default function LogoSection() {
                 {/* Real category badges only (from API) */}
                 {quickBadges.length > 0 && (
                   <div className="px-4 pb-3 pt-2 flex flex-wrap gap-2 border-b border-gray-100">
+                    {/* nav/chips → treat as navigation items → 500 */}
                     {quickBadges.slice(0, 12).map((b) => (
                       <button
                         key={b}
                         type="button"
-                        className="text-xs sm:text-sm rounded-full px-3 py-1 transition text-white bg-[#8B1C1C] hover:bg-[#6f1414]"
+                        className="text-xs sm:text-sm rounded-full px-3 py-1 transition text-white bg-[#8B1C1C] hover:bg-[#6f1414] font-medium"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           setSearchQuery(b);
@@ -623,11 +622,11 @@ export default function LogoSection() {
                 {/* “Did you mean” */}
                 {debouncedQuery && didYouMean.length > 0 && (
                   <div className="px-4 py-2 text-xs text-gray-600 border-b border-gray-100">
-                    Did you mean:{" "}
+                    <span className="font-normal">Did you mean: </span>
                     {didYouMean.map((s, i) => (
                       <button
                         key={s + i}
-                        className="underline decoration-dotted mr-2 hover:text-[#8B1C1C]"
+                        className="underline decoration-dotted mr-2 hover:text-[#8B1C1C] font-normal"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           setSearchQuery(s);
@@ -648,6 +647,7 @@ export default function LogoSection() {
                           if (it.kind === "header") {
                             return (
                               <li key={it.key} className="py-2 bg-white text-black top-0 z-10">
+                                {/* section header → 600 */}
                                 <div className="px-4 py-1 text-xs font-semibold tracking-wide uppercase text-red-700">
                                   {it.text}
                                 </div>
@@ -661,7 +661,7 @@ export default function LogoSection() {
                                   {it.chips.map((c, idx) => (
                                     <button
                                       key={c.text + idx}
-                                      className="text-xs rounded-full px-3 py-1 bg-gray-100 hover:bg-gray-200"
+                                      className="text-xs rounded-full px-3 py-1 bg-gray-100 hover:bg-gray-200 font-medium"
                                       onMouseDown={(e) => {
                                         e.preventDefault();
                                         onChipClick(c.text);
@@ -676,7 +676,7 @@ export default function LogoSection() {
                           }
                           // product row
                           const p = it.prod;
-                          const img = p.images?.[0] || "/images/default.jpg";
+                          const img = p.images?.[0] || "/images/img1.jpg";
                           return (
                             <li key={it.key}>
                               <button
@@ -685,8 +685,6 @@ export default function LogoSection() {
                                 onMouseDown={(e) => {
                                   e.preventDefault();
                                   setSearchQuery(p.name);
-                                  // Optional: navigate to product page here via router if you want
-                                  // router.push(`/home/${slugCat}/${slugSub}/products/${p.id}`)
                                 }}
                               >
                                 <img
@@ -697,11 +695,13 @@ export default function LogoSection() {
                                   height={56}
                                 />
                                 <div className="min-w-0 flex-1">
+                                  {/* product name → 500 */}
                                   <span className="block font-medium text-sm sm:text-base text-gray-900 truncate">
                                     {p.name}
                                   </span>
-                                  <p className="text-xs sm:text-sm text-gray-600 line-clamp-2">
-                                    {p.subName} • <span className="text-gray-500">{p.catName}</span>
+                                  {/* meta → 400 / inner span also 400 */}
+                                  <p className="text-xs sm:text-sm text-gray-600 font-normal line-clamp-2">
+                                    {p.subName} • <span className="text-gray-500 font-normal">{p.catName}</span>
                                   </p>
                                 </div>
                               </button>
@@ -710,13 +710,13 @@ export default function LogoSection() {
                         })}
                       </ul>
                     ) : (
-                      <div className="px-4 py-6 text-sm text-gray-500">
+                      <div className="px-4 py-6 text-sm text-gray-500 font-normal">
                         No matches for “{searchQuery}”. Try another keyword.
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="px-4 py-4 text-xs text-gray-500">
+                  <div className="px-4 py-4 text-xs text-gray-500 font-light">
                     Start typing a <span className="font-semibold text-red-700">Category</span>,
                     <span className="font-semibold text-red-700"> Subcategory</span>, or a
                     <span className="font-semibold text-red-700"> Product</span>. Results adapt to
@@ -730,16 +730,46 @@ export default function LogoSection() {
 
         {/* Right-side links */}
         <div className="flex flex-row gap-8 px-1 pt-2 sm:pt-0 flex-wrap sm:flex-nowrap items-center justify-center sm:justify-start">
+        <Link
+                href="/checkout2"
+                className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
+              >
+                 <img
+                    src="https://img.icons8.com/?size=100&id=ii6Lr4KivOiE&format=png&color=FFFFFF"
+                    alt="Help Centre icon"
+                    width={20}
+                    height={20}
+                    className="-ml-5 w-5 h-5 left-3"
+                  />
+                  <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Cart</span>
+              </Link>
+
+                <Link
+                    href="/blog"
+                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md -ml-5"
+                  >
+                     <img
+                        src="https://img.icons8.com/?size=100&id=WX84CKOI9WcJ&format=png&color=FFFFFF"
+                        alt="Help Centre icon"
+                        width={20}
+                        height={20}
+                        className="-ml-5 w-5 h-5 left-3"
+                      />
+                   
+                     <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Blog</span>
+                  </Link>
+
           <Link href="/contact">
             <div className="flex gap-3 items-center flex-nowrap">
               <img
-                src="https://img.icons8.com/?size=100&id=1gLgJEjuNLxX&format=png&color=000000"
+                src="https://img.icons8.com/?size=100&id=Ib9FADThtmSf&format=png&color=000000"
                 alt="Help Centre icon"
                 width={20}
                 height={20}
                 className="-ml-5 w-5 h-5 left-3"
               />
-              <span className="-ml-1 whitespace-nowrap text-sm font-bold text-black">
+              {/* link text → 400/500; make it 500 as nav */}
+              <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
                 Contact
               </span>
             </div>
@@ -747,13 +777,14 @@ export default function LogoSection() {
 
           <div className="flex gap-2 items-center">
             <img
-              src="https://img.icons8.com/?size=100&id=LmG49EnUQig9&format=png&color=000000"
+              src="https://img.icons8.com/?size=100&id=s7eHaFDy5Rqu&format=png&color=000000"
               alt="UAE icon"
               width={21}
               height={21}
               className="w-[21px] h-[21px]"
             />
-            <span className="text-base font-bold text-black">
+            {/* nav link → 500 */}
+            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
               <a href="/about">About</a>
             </span>
           </div>
@@ -767,20 +798,21 @@ export default function LogoSection() {
               >
                 <div className="flex items-center admin-panel">
                   <img
-                    src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
+                    src="https://img.icons8.com/?size=100&id=4kuCnjaqo47m&format=png&color=000000"
                     alt="Login"
                     width={20}
                     height={20}
                     className="mr-1"
                   />
-                  <span className="cursor-pointer text-sm text-black">Login</span>
+                  {/* span → 400 */}
+                  <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">Login</span>
                 </div>
               </button>
             ) : (
               <div className="flex items-center admin-panel gap-3">
                 {user?.photoURL ? (
                   <img
-                    src={user.photoURL}
+                    src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
                     alt="User Profile"
                     width={40}
                     height={40}
@@ -788,7 +820,7 @@ export default function LogoSection() {
                   />
                 ) : (
                   <img
-                    src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
+                    src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
                     alt="User"
                     width={20}
                     height={20}
@@ -796,116 +828,27 @@ export default function LogoSection() {
                   />
                 )}
 
-                <span className="text-sm text-black">{username}</span>
+                {/* username → 400 */}
+                <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">{username}</span>
 
                 <div className="flex items-center gap-3">
+                  {/* buttons → 500 */}
                   <button
                     onClick={handleLogout}
                     aria-label="Logout"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
+                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1m0-10V5"
-                      />
-                    </svg>
-                    Logout
+                    <img
+                    src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=000000"
+                    alt="User"
+                    width={20}
+                    height={20}
+                    className="h-10 w-10 rounded-full bg-gray-200 p-1"
+                  />
+                    <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">Log Out</span>
                   </button>
-
-                  <Link
-                    href="/checkout2"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7A1 1 0 007 17h10m0 0a2 2 0 11-4 0m4 0a2 2 0 104 0"
-                      />
-                    </svg>
-                    Cart
-                  </Link>
-
-                  <Link
-                    href="/blog"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8 16h8M8 12h8m-8-4h8M4 6h16M4 18h16"
-                      />
-                    </svg>
-                    Blog
-                  </Link>
                 </div>
               </div>
-            )}
-
-            {!user && (
-              <>
-                <Link
-                  href="/checkout2"
-                  className="ml-3 cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7A1 1 0 007 17h10m0 0a2 2 0 11-4 0m4 0a2 2 0 104 0"
-                    />
-                  </svg>
-                  Cart
-                </Link>
-
-                <Link
-                  href="/blog"
-                  className="ml-1 cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-semibold px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M8 16h8M8 12h8m-8-4h8M4 6h16M4 18h16"
-                    />
-                  </svg>
-                  Blog
-                </Link>
-              </>
             )}
           </div>
         </div>

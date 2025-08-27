@@ -34,26 +34,25 @@ const sidebarLinks = [
   'Dashboard', 'Products Section', 'Blog', 'Settings', 'First Carousel',
   'Media Library', 'Notifications', 'Testimonials', 'Second Carousel',
   'Hero Banner', 'Manage Categories', 'Orders', 'Inventory', 'Google Analytics',
-  'New Account', 'Google Settings'
+  'New Account', 'Google Settings', 'Navbar', 'User View',
 ];
 
 const rolePermissionsMap: { [key: string]: string[] } = {
   'Super Admin': [...sidebarLinks],
-  'Admin': ['Products Section', 'Settings', 'Blog', 'Orders', 'Inventory', 'Manage Categories'],
-  'Product Manager': ['Products Section', 'Inventory', 'Orders', 'Manage Categories'],
-  'Marketing Manager': ['Blog', 'Testimonials', 'First Carousel', 'Second Carousel', 'Hero Banner'],
-  'Content Editor': ['Media Library', 'Blog', 'Hero Banner'],
-  'Customer Support': ['Orders', 'Notifications', 'Testimonials'],
+  'Admin': ['Products Section', 'Settings', 'Blog', 'Orders', 'Inventory', 'Manage Categories', 'User View'],
+  'Product Manager': ['Products Section', 'Inventory', 'Orders', 'Manage Categories', 'User View'],
+  'Marketing Manager': ['Blog', 'Testimonials', 'First Carousel', 'Second Carousel', 'Hero Banner', 'Navbar', 'User View'],
+  'Content Editor': ['Media Library', 'Blog', 'Hero Banner', 'First Carousel', 'Second Carousel',  'Navbar', 'User View'],
+  'Customer Support': ['Orders', 'Notifications', 'Testimonials', 'User View'],
   'Developer': [...sidebarLinks],
-  'Analyst': ['Dashboard', 'Google Analytics', 'Google Settings'],
+  'Analyst': ['Dashboard', 'Google Analytics', 'Google Settings', 'User View'],
   'Custom Role': [],
-  'Temp Access': ['Dashboard', 'Media Library'],
+  'Temp Access': ['Dashboard', 'Media Library', 'User View'],
 };
 
-// ✅ Helper: normalize permissions so "Blog" ⇒ adds hidden "Blog View"
 const normalizePermissions = (perms: string[]) => {
   const next = new Set(perms);
-  if (next.has('Blog')) next.add('Blog View'); // invisible auto-grant
+  if (next.has('Blog')) next.add('Blog View'); // invisible auto-grantx
   return Array.from(next);
 };
 
@@ -96,9 +95,8 @@ export default function AdminNewAccountPage() {
         ? prev.permissions.filter((item) => item !== label)
         : [...prev.permissions, label];
 
-      // Keep UI clean (no "Blog View" checkbox), but still normalize in memory
       const normalized = normalizePermissions(base);
-      return { ...prev, permissions: normalized.filter(p => p !== 'Blog View') }; // store UI-visible list
+      return { ...prev, permissions: normalized.filter(p => p !== 'Blog View') };
     });
   };
 
@@ -109,8 +107,7 @@ export default function AdminNewAccountPage() {
     }
 
     try {
-      // ✅ ensure Blog ⇒ Blog View before sending to backend
-      const access_pages = normalizePermissions(formData.permissions);
+     const access_pages = normalizePermissions(formData.permissions);
 
       const res = await fetch(`${API_BASE_URL}/api/save-admin/`, withFrontendKey({
         method: 'POST',

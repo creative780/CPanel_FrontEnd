@@ -8,7 +8,7 @@ import { API_BASE_URL } from "../../utils/api";
 type AttributeOption = {
   id: string;
   label: string;
-  price_delta: number; // AED
+  price_delta: number;
   is_default?: boolean;
   image_id?: string | null;
   _image_file?: File | null;
