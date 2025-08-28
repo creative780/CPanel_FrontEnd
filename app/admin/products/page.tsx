@@ -116,7 +116,6 @@ export default function AdminProductManager() {
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [isMounted, setIsMounted] = useState(false);
-  // near other guards
   const [isUnlinking, setIsUnlinking] = useState(false);
 
   // Change Existing Product modal
@@ -131,7 +130,7 @@ export default function AdminProductManager() {
 
   const initialFetchAbortRef = useRef<AbortController | null>(null);
 
-  // util: uniq by id
+  // util: uniq by id (stringified)
   const uniqueById = <T extends { id: string }>(list: T[]) =>
     Array.from(new Map(list.map((p) => [String(p.id), p])).values());
 
@@ -180,7 +179,7 @@ export default function AdminProductManager() {
         }
       }
 
-      // 🔧 Attach loop: put products onto each subcategory and push subs into their categories
+      // Attach: unique products per subcategory; push subs into their categories
       for (const sub of visibleSubcategories) {
         const sid = String((sub as any).subcategory_id || (sub as any).id || '');
         (sub as any).products = uniqueById(prodsBySubId.get(sid) || []);
@@ -194,9 +193,9 @@ export default function AdminProductManager() {
 
       const finalData = Array.from(categoryMap.values());
       const allSubcats = finalData.flatMap((c) => c.subcategories);
-      const allProdsFromTree = allSubcats.flatMap((sc: any) => sc.products || []);
+      const allProdsFromTree = uniqueById(allSubcats.flatMap((sc: any) => sc.products || []));
 
-      // Prefer master list for notifications (clean, deduped)
+      // Master, deduped list
       const allProdsMaster = uniqueById(arrProds);
       for (const p of allProdsMaster) {
         const qty = Number(p.quantity ?? 0);
@@ -239,20 +238,20 @@ export default function AdminProductManager() {
 
     if (!selectedCategory && selectedSubCategory === '__all__') {
       const all = allSubs.flatMap((sc: any) => sc.products || []);
-      setProducts(uniqueById(all)); // de-dupe in global "All"
+      setProducts(uniqueById(all)); // global "All"
       return;
     }
 
     if (selectedCategory && selectedSubCategory === '__all__') {
       const cat = rawData.find((c) => c.name === selectedCategory);
       const catProds = (cat?.subcategories || []).flatMap((sc: any) => sc.products || []);
-      setProducts(uniqueById(catProds)); // de-dupe in Category + All
+      setProducts(uniqueById(catProds)); // Category + All
       return;
     }
 
     if (selectedSubCategory && selectedSubCategory !== '__all__') {
       const sub = allSubs.find((sc: any) => sc.name === selectedSubCategory);
-      setProducts(uniqueById(sub?.products || [])); // specific subcategory (includes multi-mapped)
+      setProducts(uniqueById(sub?.products || [])); // specific subcategory
       return;
     }
   }, [selectedCategory, selectedSubCategory, rawData]);
@@ -262,7 +261,6 @@ export default function AdminProductManager() {
   const selectedSubcategoryId = useMemo(() => {
     if (selectedSubCategory === '__all__') return null;
     const sub = subcategories.find((s: any) => s.name === selectedSubCategory);
-    // Prefer canonical subcategory_id, fallback to id
     return sub ? String(sub.subcategory_id || sub.id) : null;
   }, [selectedSubCategory, subcategories]);
 
@@ -355,63 +353,65 @@ export default function AdminProductManager() {
     }
   }, [selectedProductIds, isDeleting, reloadAllData]);
 
-  // add below handleDeleteMultiple (or nearby)
-const handleBulkUnlinkFromSubcategory = useCallback(async () => {
-  if (!selectedSubcategoryId) {
-    toast.error('Select a specific subcategory first.');
-    return;
-  }
-  if (selectedProductIds.length === 0 || isUnlinking) return;
+  const handleBulkUnlinkFromSubcategory = useCallback(async () => {
+    if (!selectedSubcategoryId) {
+      toast.error('Select a specific subcategory first.');
+      return;
+    }
+    if (selectedProductIds.length === 0 || isUnlinking) return;
 
-  setIsUnlinking(true);
-  try {
-    // Build quick lookup to resolve product_id vs id
-    const byId = new Map<string, any>();
-    for (const p of products) byId.set(String(p.id), p);
+    setIsUnlinking(true);
+    try {
+      const byId = new Map<string, any>();
+      for (const p of products) byId.set(String(p.id), p);
 
-    const calls = selectedProductIds.map((pid) => {
-      const p = byId.get(String(pid));
-      const productId = String(p?.product_id || p?.id);
-      if (!productId) return Promise.reject(new Error(`Missing product_id for ${pid}`));
+      const calls = selectedProductIds.map((pid) => {
+        const p = byId.get(String(pid));
+        const productId = String(p?.product_id || p?.id);
+        if (!productId) return Promise.reject(new Error(`Missing product_id for ${pid}`));
 
-      const payload = {
-        product_id: productId,
-        // API accepts subcategory_ids or subcategory_id; send the array explicitly
-        subcategory_ids: [String(selectedSubcategoryId)],
-      };
+        const payload = {
+          product_id: productId,
+          subcategory_ids: [String(selectedSubcategoryId)],
+        };
 
-      return fetch(
-        `${API_BASE_URL}/api/unlink-product-subcategory/`,
-        withFrontendKey({
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-      ).then((res) => parseJsonStrict(res, 'unlink-product-subcategory'));
-    });
+        return fetch(
+          `${API_BASE_URL}/api/unlink-product-subcategory/`,
+          withFrontendKey({
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        ).then((res) => parseJsonStrict(res, 'unlink-product-subcategory'));
+      });
 
-    const results = await Promise.allSettled(calls);
-    const ok = results.filter(r => r.status === 'fulfilled').length;
-    const fail = results.length - ok;
+      const results = await Promise.allSettled(calls);
+      const ok = results.filter(r => r.status === 'fulfilled').length;
+      const fail = results.length - ok;
 
-    if (ok > 0) toast.success(`🔗 Unlinked ${ok} product(s) from the subcategory`);
-    if (fail > 0) toast.error(`❌ ${fail} unlink(s) failed`);
+      if (ok > 0) toast.success(`🔗 Unlinked ${ok} product(s) from the subcategory`);
+      if (fail > 0) toast.error(`❌ ${fail} unlink(s) failed`);
 
-    setSelectedProductIds([]);
-    await reloadAllData();
-  } catch (err: any) {
-    toast.error(`❌ Unlink failed: ${err.message || err}`);
-  } finally {
-    setIsUnlinking(false);
-  }
-}, [selectedProductIds, isUnlinking, products, selectedSubcategoryId, reloadAllData]);
+      setSelectedProductIds([]);
+      await reloadAllData();
+    } catch (err: any) {
+      toast.error(`❌ Unlink failed: ${err.message || err}`);
+    } finally {
+      setIsUnlinking(false);
+    }
+  }, [selectedProductIds, isUnlinking, products, selectedSubcategoryId, reloadAllData]);
 
   const toggleSelectProduct = useCallback((id: string) => {
-    setSelectedProductIds((prev) => (prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]));
+    const sid = String(id);
+    setSelectedProductIds((prev) => (prev.includes(sid) ? prev.filter((pid) => pid !== sid) : [...prev, sid]));
   }, []);
 
+  // ---------- Render list (dedup FIRST, then filter/sort) ----------
   const filteredAndSortedProducts = useMemo(() => {
-    const base = [...products].filter((prod) => {
+    // Hard guard: collapse any accidental dups before anything else.
+    const baseUnique = uniqueById(products).map(p => ({ ...p, id: String(p.id) }));
+
+    const filtered = baseUnique.filter((prod) => {
       const normalizedStatus = (prod.stock_status || '').trim().toLowerCase();
       const normalizedFilter = stockFilter.trim().toLowerCase();
       const isLow = Number(prod.quantity) > 0 && Number(prod.quantity) <= 5;
@@ -423,22 +423,22 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
     });
 
     if (sortOrder === 'asc') {
-      return base.sort((a, b) => Number(a.price) - Number(b.price));
+      return [...filtered].sort((a, b) => Number(a.price) - Number(b.price));
     }
     if (sortOrder === 'desc') {
-      return base.sort((a, b) => Number(b.price) - Number(a.price));
+      return [...filtered].sort((a, b) => Number(b.price) - Number(a.price));
     }
-    return base;
+    return filtered;
   }, [products, sortOrder, stockFilter]);
 
   const areAllSelected = useMemo(
-    () => filteredAndSortedProducts.length > 0 && filteredAndSortedProducts.every((p) => selectedProductIds.includes(p.id)),
+    () => filteredAndSortedProducts.length > 0 && filteredAndSortedProducts.every((p) => selectedProductIds.includes(String(p.id))),
     [filteredAndSortedProducts, selectedProductIds]
   );
 
   const toggleSelectAll = useCallback(() => {
     if (areAllSelected) setSelectedProductIds([]);
-    else setSelectedProductIds(filteredAndSortedProducts.map((p) => p.id));
+    else setSelectedProductIds(filteredAndSortedProducts.map((p) => String(p.id)));
   }, [areAllSelected, filteredAndSortedProducts]);
 
   // ---------- Drag & Drop ----------
@@ -458,8 +458,8 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
       reordered.splice(result.destination.index, 0, moved);
 
       setProducts((prev) => {
-        const idOrder = reordered.map((p) => p.id);
-        const mapPrev = new Map(prev.map((p) => [p.id, p]));
+        const idOrder = reordered.map((p) => String(p.id));
+        const mapPrev = new Map(prev.map((p) => [String(p.id), p]));
         return idOrder.map((id) => mapPrev.get(id)).filter(Boolean) as any[];
       });
 
@@ -469,7 +469,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
           withFrontendKey({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ products: reordered.map((p) => ({ id: p.id })) }),
+            body: JSON.stringify({ products: reordered.map((p) => ({ id: String(p.id) })) }),
           })
         );
         await parseJsonStrict(response, 'update-product-order');
@@ -499,7 +499,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
   }, []);
 
   const modalFiltered = useMemo(() => {
-    const base = allProductsMaster || [];
+    const base = uniqueById(allProductsMaster).map(p => ({ ...p, id: String(p.id) })); // extra guard
     if (changeSearch.trim()) {
       const q = changeSearch.trim().toLowerCase();
       return base.filter((p) => (p.name || '').toLowerCase().includes(q));
@@ -622,8 +622,8 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
               onChange={(e) => setSelectedCategory(e.target.value)}
             >
               <option value="">All Categories</option>
-              {categories.map((cat, i) => (
-                <option key={i} value={cat}>{cat}</option>
+              {categories.map((cat) => (
+                <option key={`cat::${cat}`} value={cat}>{cat}</option>
               ))}
             </select>
 
@@ -634,9 +634,12 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
               onChange={(e) => setSelectedSubCategory(e.target.value)}
             >
               <option value="__all__">All Subcategories</option>
-              {subcategories.map((sub: any, i: number) => (
-                <option key={i} value={sub.name}>{sub.name}</option>
-              ))}
+              {subcategories.map((sub: any) => {
+                const sid = String(sub.subcategory_id || sub.id || sub.name);
+                return (
+                  <option key={`subopt::${sid}`} value={sub.name}>{sub.name}</option>
+                );
+              })}
             </select>
 
             <div className="max-h-[500px] overflow-auto shadow-lg rounded-2xl border border-gray-200">
@@ -680,6 +683,8 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
                           </tr>
                         ) : (
                           filteredAndSortedProducts.map((prod, pi) => {
+                            const idStr = String(prod.id);
+                            const dragId = `prod::${idStr}`; // stable, context-prefixed
                             const imageUrl = prod?.images?.[0]?.value || prod?.image || '/img1.jpg';
                             const printingList = prod.printingMethod ?? prod.printing_methods ?? [];
                             const printingText = Array.isArray(printingList)
@@ -696,7 +701,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
                               .join(' ');
 
                             return (
-                              <Draggable key={prod.id} draggableId={String(prod.id)} index={pi}>
+                              <Draggable key={dragId} draggableId={dragId} index={pi}>
                                 {(prov) => (
                                   <tr
                                     ref={prov.innerRef}
@@ -706,14 +711,14 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
                                   >
                                     <td className="p-3 text-center">
                                       <Checkbox
-                                        checked={selectedProductIds.includes(prod.id)}
-                                        onChange={() => toggleSelectProduct(prod.id)}
+                                        checked={selectedProductIds.includes(idStr)}
+                                        onChange={() => toggleSelectProduct(idStr)}
                                         color="secondary"
                                         size="medium"
                                         sx={{ color: '#891F1A', '&.Mui-checked': { color: '#891F1A' }, marginLeft: '-13px' }}
                                       />
                                     </td>
-                                    <td className="p-4 text-center font-semibold text-[#891F1A]">{prod.id}</td>
+                                    <td className="p-4 text-center font-semibold text-[#891F1A]">{idStr}</td>
 
                                     <td className="p-4 text-center">
                                       <img
@@ -732,7 +737,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
 
                                     <td className="p-4 text-center">
                                       <button
-                                        onClick={() => { setEditingProductId(prod.id); setIsModalOpen(true); }}
+                                        onClick={() => { setEditingProductId(idStr); setIsModalOpen(true); }}
                                         className="bg-[#891F1A] hover:bg-[#6e1915] text-white text-xs px-4 py-2 rounded-full transition"
                                       >
                                         View / Edit
@@ -760,7 +765,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
              <div className="flex gap-2 ml-auto">
                 <span>Selected: {selectedProductIds.length}</span>
 
-                {/* existing Mark Out of Stock button - unchanged */}
+                {/* Mark Out of Stock */}
                 <button
                   onClick={handleBulkMarkOutOfStock}
                   disabled={selectedProductIds.length === 0 || isBulkOOS}
@@ -773,7 +778,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
                   {isBulkOOS ? 'Marking…' : 'Mark Out of Stock'}
                 </button>
 
-                {/* 🔁 NEW: if a specific subcategory is selected, show Unlink; otherwise show Delete */}
+                {/* Unlink vs Delete */}
                 {selectedSubcategoryId ? (
                   <button
                     onClick={handleBulkUnlinkFromSubcategory}
@@ -852,7 +857,7 @@ const handleBulkUnlinkFromSubcategory = useCallback(async () => {
                       {modalFiltered.map((p) => {
                         const img = p?.images?.[0]?.value || p?.image || '/img1.jpg';
                         return (
-                          <li key={p.id} className="flex items-center justify-between gap-3 p-2 border rounded-lg hover:bg-gray-50">
+                          <li key={`modal::${p.id}`} className="flex items-center justify-between gap-3 p-2 border rounded-lg hover:bg-gray-50">
                             <div className="flex items-center gap-3 min-w-0">
                               <img src={img} alt={p.name} className="w-10 h-10 rounded object-cover border" />
                               <div className="truncate">
