@@ -172,7 +172,12 @@ const CategorySubCategoryModal: React.FC<CategorySubCategoryModalProps> = ({
 
       setSubCaption(initialSubCategoryData?.caption ?? "");
       setSubDescription(initialSubCategoryData?.description ?? "");
-      setSelectedCategories(initialSubCategoryData?.selectedCategories || []);
+      setSelectedCategories(
+        (initialSubCategoryData?.selectedCategories ||
+        initialSubCategoryData?.category_ids ||
+        []
+        ).map(String)
+      );
       setSubImageFile(null);
     } else if (!openSubCategoryModal) {
       setSubTitle("");

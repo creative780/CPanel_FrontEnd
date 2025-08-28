@@ -809,22 +809,22 @@ export default function LogoSection() {
                 </div>
               </button>
             ) : (
-              <div className="flex items-center admin-panel gap-3">
+              <div className="flex items-center admin-panel gap-2">
                 {user?.photoURL ? (
                   <img
                     src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
                     alt="User Profile"
-                    width={40}
-                    height={40}
-                    className="h-10 w-10 rounded-full object-cover"
+                    width={20}
+                    height={20}
+                    className="ml-2"
                   />
                 ) : (
                   <img
                     src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
                     alt="User"
-                    width={20}
-                    height={20}
-                    className="h-10 w-10 rounded-full bg-gray-200 p-1"
+                    width={10}
+                    height={10}
+                    className="ml-2"
                   />
                 )}
 
@@ -836,16 +836,16 @@ export default function LogoSection() {
                   <button
                     onClick={handleLogout}
                     aria-label="Logout"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-4 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
+                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-7 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
                   >
                     <img
-                    src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=000000"
+                    src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=FFFFFF"
                     alt="User"
                     width={20}
                     height={20}
-                    className="h-10 w-10 rounded-full bg-gray-200 p-1"
+                    className=""
                   />
-                    <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">Log Out</span>
+                    <span className="whitespace-nowrap text-sm font-medium text-white">Log Out</span>
                   </button>
                 </div>
               </div>
