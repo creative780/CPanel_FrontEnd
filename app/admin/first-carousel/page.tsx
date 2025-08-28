@@ -5,7 +5,7 @@ import AdminAuthGuard from '../components/AdminAuthGaurd';
 import AdminSidebar from '../components/AdminSideBar';
 import { API_BASE_URL } from '../../utils/api';
 
-// ⬇️ Frontend key helper (unchanged)
+// Frontend key helper
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
@@ -14,15 +14,24 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
 };
 
 // Types
-type Category = { id: string; name: string; slug?: string };
+type Category = { id: string; name: string; slug?: string; status?: string };
+type Subcategory = {
+  id: string;
+  name: string;
+  slug?: string;
+  status?: string;
+  category_ids?: string[]; // provided by backend
+};
 
 type ImageRow = {
   type: 'url' | 'file';
   value: string;
   file: File | null;
   title: string;
-  categoryId: string;    // always string for DOM <select>
-  categoryName: string;  // text input; source of truth on save
+  // row-scoped filter + selection
+  categoryFilterId: string;   // '' = All Categories (for THIS row)
+  subcategoryId: string;      // selected subcategory id
+  subcategoryName: string;    // source of truth on save (we still resolve ID from this)
 };
 
 export default function FirstCarouselPage() {
@@ -30,37 +39,79 @@ export default function FirstCarouselPage() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
 
+  // Master lists (visible only)
   const [categories, setCategories] = useState<Category[]>([]);
+  const [subcategories, setSubcategories] = useState<Subcategory[]>([]);
+
+  // Carousel rows
   const [images, setImages] = useState<ImageRow[]>([
-    { type: 'url', value: '', file: null, title: '', categoryId: '', categoryName: '' }
+    { type: 'url', value: '', file: null, title: '', categoryFilterId: '', subcategoryId: '', subcategoryName: '' }
   ]);
 
   // Helpers
-  const findCategoryById = (id: string) => categories.find(c => c.id === id);
-  const findCategoryByName = (name: string) => {
+  const toStringIdOrNull = (idStr: string) => {
+    const v = (idStr ?? '').toString().trim();
+    return v ? v : null;
+  };
+  const findSubById = (id: string) => subcategories.find(s => s.id === id);
+  const findSubByName = (name: string) => {
     const n = (name || '').trim().toLowerCase();
     if (!n) return undefined;
-    return categories.find(c => c.name.trim().toLowerCase() === n);
+    return subcategories.find(s => s.name.trim().toLowerCase() === n);
   };
-  const getLastLinkedCategory = (rows: ImageRow[], stopIndex: number) => {
+  const getLastLinkedSub = (rows: ImageRow[], stopIndex: number) => {
     for (let i = stopIndex - 1; i >= 0; i--) {
       const r = rows[i];
-      if ((r.categoryName ?? '').toString().trim()) {
-        const byName = findCategoryByName(r.categoryName);
+      if ((r.subcategoryName ?? '').toString().trim()) {
+        const byName = findSubByName(r.subcategoryName);
         if (byName) return byName;
       }
-      if ((r.categoryId ?? '').toString().trim()) {
-        const byId = findCategoryById(r.categoryId);
+      if ((r.subcategoryId ?? '').toString().trim()) {
+        const byId = findSubById(r.subcategoryId);
         if (byId) return byId;
       }
     }
     return undefined;
   };
-  // ✅ Keep IDs as strings (Category PK is CharField)
-  const toStringIdOrNull = (idStr: string) => {
-    const v = (idStr ?? '').toString().trim();
-    return v ? v : null;
-  };
+
+  // Fetch visible categories + subcategories with AbortController
+  useEffect(() => {
+    const controller = new AbortController();
+
+    Promise.all([
+      fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey({ signal: controller.signal })),
+      fetch(`${API_BASE_URL}/api/show-subcategories/`, withFrontendKey({ signal: controller.signal })),
+    ])
+      .then(async ([catsRes, subsRes]) => {
+        const [arrCats, arrSubs] = await Promise.all([catsRes.json(), subsRes.json()]);
+
+        const visibleCategories = (Array.isArray(arrCats) ? arrCats : []).filter((c: any) => c?.status === 'visible');
+        const visibleSubcategories = (Array.isArray(arrSubs) ? arrSubs : []).filter((sc: any) => sc?.status === 'visible');
+
+        const cats: Category[] = visibleCategories.map((c: any) => ({
+          id: c?.id != null ? String(c.id) : String(c?.category_id ?? ''),
+          name: String(c?.name ?? c?.title ?? ''),
+          slug: String(c?.slug ?? ''),
+          status: String(c?.status ?? ''),
+        }));
+
+        const subs: Subcategory[] = visibleSubcategories.map((s: any) => ({
+          id: s?.id != null ? String(s.id) : String(s?.subcategory_id ?? ''),
+          name: String(s?.name ?? s?.title ?? ''),
+          slug: String(s?.slug ?? ''),
+          status: String(s?.status ?? ''),
+          category_ids: Array.isArray(s?.category_ids) ? s.category_ids.map((x: any) => String(x)) : [],
+        }));
+
+        setCategories(cats);
+        setSubcategories(subs);
+      })
+      .catch((err) => {
+        if (err?.name !== 'AbortError') console.error('Fetch cats/subs error:', err);
+      });
+
+    return () => controller.abort();
+  }, []);
 
   // Fetch existing carousel + normalize into rows
   useEffect(() => {
@@ -74,27 +125,26 @@ export default function FirstCarouselPage() {
           const formatted: ImageRow[] = data.images.map((img: any, idx: number) => {
             const src = typeof img === 'string' ? img : (img?.src || '');
             const cleanedUrl = src.replace(`${API_BASE_URL}`, '').replace(`${API_BASE_URL}`, '');
-            // Backend now returns {"category": {"id": <PK string>, ...}}
-            const idStr = img?.category?.id != null ? String(img.category.id) : '';
-            const nameStr = img?.category?.name ? String(img.category.name) : '';
+
+            const idStr = img?.subcategory?.id != null ? String(img.subcategory.id) : '';
+            const nameStr = img?.subcategory?.name ? String(img.subcategory.name) : '';
 
             return {
               type: 'url',
               value: cleanedUrl || '',
               file: null,
               title: img?.title || `Product ${idx + 1}`,
-              categoryId: idStr,        // string
-              categoryName: nameStr,    // string
+              categoryFilterId: '', // we’ll backfill after subs are loaded
+              subcategoryId: idStr,
+              subcategoryName: nameStr,
             };
           });
 
-          // Pre-hydrate missing rows with the latest previously linked category
+          // Pre-hydrate missing rows with the latest previously linked subcategory
           const hydrated = formatted.map((row, idx, arr) => {
-            if (!(row.categoryName ?? '').toString().trim() && !(row.categoryId ?? '').toString().trim()) {
-              const last = getLastLinkedCategory(arr, idx);
-              if (last) {
-                return { ...row, categoryName: last.name, categoryId: last.id };
-              }
+            if (!(row.subcategoryName ?? '').toString().trim() && !(row.subcategoryId ?? '').toString().trim()) {
+              const last = getLastLinkedSub(arr, idx);
+              if (last) return { ...row, subcategoryName: last.name, subcategoryId: last.id };
             }
             return row;
           });
@@ -105,61 +155,25 @@ export default function FirstCarouselPage() {
       .catch(err => console.error('Error fetching carousel data:', err));
   }, []);
 
-  // Fetch categories for dropdown
+  // After subcategories are loaded, if a row has a subcategory but no row category filter,
+  // set the row filter to the first mapped parent (for better UX).
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/show-categories/`, withFrontendKey())
-      .then(res => res.json())
-      .then((list) => {
-        const normalized: Category[] = Array.isArray(list)
-          ? list.map((c: any) => ({
-              // whatever your backend key is, normalize to string
-              id: c?.id != null ? String(c.id) : String(c?.category_id ?? ''),
-              name: String(c?.name ?? c?.title ?? ''),
-              slug: String(c?.slug ?? ''),
-            }))
-          : [];
-        setCategories(normalized);
-      })
-      .catch(err => {
-        console.error('Error fetching categories:', err);
-        setCategories([]);
-      });
-  }, []);
-
-  // 🔁 Reconcile rows AFTER categories are loaded so the <select> has a matching option
-  useEffect(() => {
-    if (!categories.length) return;
-    setImages(prev => {
-      const next = prev.map((row, idx, arr) => {
-        const id = (row.categoryId ?? '').toString().trim();
-
-        // If current id matches an option, keep it
-        if (id && categories.some(c => c.id === id)) {
-          // Also normalize name from id if the name is empty
-          if (!((row.categoryName ?? '').toString().trim())) {
-            const byId = findCategoryById(id);
-            if (byId) return { ...row, categoryName: byId.name };
-          }
-          return row;
+    if (!subcategories.length) return;
+    setImages(prev => prev.map(row => {
+      if (!row.categoryFilterId && row.subcategoryId) {
+        const sub = findSubById(row.subcategoryId);
+        if (sub?.category_ids?.length) {
+          return { ...row, categoryFilterId: sub.category_ids[0] };
         }
+      }
+      return row;
+    }));
+  }, [subcategories]); // eslint-disable-line react-hooks/exhaustive-deps
 
-        // Else try to resolve by categoryName
-        const byName = findCategoryByName(row.categoryName);
-        if (byName) return { ...row, categoryId: byName.id, categoryName: byName.name };
-
-        // Else fallback to last linked category in earlier rows
-        const last = getLastLinkedCategory(arr, idx);
-        if (last) return { ...row, categoryId: last.id, categoryName: last.name };
-
-        return row; // remains unselected
-      });
-      return next;
-    });
-  }, [categories]);
-
+  // Row handlers
   const handleAddImage = () => {
     setImages(prev => {
-      const last = getLastLinkedCategory(prev, prev.length);
+      const last = getLastLinkedSub(prev, prev.length);
       return [
         ...prev,
         {
@@ -167,8 +181,9 @@ export default function FirstCarouselPage() {
           value: '',
           file: null,
           title: '',
-          categoryId: last?.id ?? '',
-          categoryName: last?.name ?? '',
+          categoryFilterId: last?.category_ids?.[0] ?? '',
+          subcategoryId: last?.id ?? '',
+          subcategoryName: last?.name ?? '',
         }
       ];
     });
@@ -178,27 +193,61 @@ export default function FirstCarouselPage() {
     setImages(prev => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
-  const handleImageChange = (index: number, field: keyof ImageRow, value: any) => {
+  const handleRowChange = (index: number, patch: Partial<ImageRow>) => {
     setImages(prev => {
-      const updated = [...prev];
-      const row = { ...updated[index] };
+      const list = [...prev];
+      list[index] = { ...list[index], ...patch };
+      return list;
+    });
+  };
 
-      if (field === 'categoryId') {
-        // Dropdown changed → sync text input with selected name
-        row.categoryId = value as string;
-        const match = findCategoryById(row.categoryId);
-        row.categoryName = match ? match.name : row.categoryName;
-      } else if (field === 'categoryName') {
-        // Text changed → attempt resolve ID by exact name
-        row.categoryName = String(value);
-        const match = findCategoryByName(row.categoryName);
-        row.categoryId = match ? match.id : row.categoryId;
-      } else {
-        (row as any)[field] = value;
+  const handleRowCategoryChange = (index: number, categoryId: string) => {
+    setImages(prev => {
+      const list = [...prev];
+      const row = { ...list[index], categoryFilterId: categoryId };
+
+      // If current sub no longer belongs to the chosen category, clear it
+      if (row.subcategoryId) {
+        const sub = findSubById(row.subcategoryId);
+        const belongs = !categoryId || (sub?.category_ids || []).includes(categoryId);
+        if (!belongs) {
+          row.subcategoryId = '';
+          row.subcategoryName = '';
+        }
       }
+      list[index] = row;
+      return list;
+    });
+  };
 
-      updated[index] = row;
-      return updated;
+  const handleRowSubSelect = (index: number, subId: string) => {
+    const sub = findSubById(subId);
+    setImages(prev => {
+      const list = [...prev];
+      const row = { ...list[index] };
+      row.subcategoryId = subId;
+      row.subcategoryName = sub?.name || row.subcategoryName;
+
+      // Auto-select row category filter based on chosen sub’s parent (first match)
+      if (sub?.category_ids?.length) row.categoryFilterId = sub.category_ids[0];
+
+      list[index] = row;
+      return list;
+    });
+  };
+
+  const handleRowSubName = (index: number, name: string) => {
+    const match = findSubByName(name);
+    setImages(prev => {
+      const list = [...prev];
+      const row = { ...list[index] };
+      row.subcategoryName = name;
+      if (match) {
+        row.subcategoryId = match.id;
+        if (match.category_ids?.length) row.categoryFilterId = match.category_ids[0];
+      }
+      list[index] = row;
+      return list;
     });
   };
 
@@ -208,7 +257,6 @@ export default function FirstCarouselPage() {
         images.map(async (img, idx, arr) => {
           let src = '';
 
-          // ⛔ IMAGE LOGIC UNCHANGED
           if (img.type === 'url') {
             const trimmed = img.value.trim();
             if (!trimmed) return null;
@@ -229,23 +277,20 @@ export default function FirstCarouselPage() {
             });
           }
 
-          // CATEGORY RESOLUTION PRIORITY:
-          // 1) categoryName → exact match to ID
-          // 2) categoryId (dropdown)
-          // 3) fallback to most recently linked category
+          // Resolve subcategory for POST (name → id → fallback)
           let chosenId: string | '' = '';
-          const byName = findCategoryByName(img.categoryName);   // 👈 text input is the source of truth
+          const byName = findSubByName(img.subcategoryName);
           if (byName) chosenId = byName.id;
-          else if (img.categoryId) chosenId = img.categoryId;
+          else if (img.subcategoryId) chosenId = img.subcategoryId;
           else {
-            const last = getLastLinkedCategory(arr, idx);
+            const last = getLastLinkedSub(arr, idx);
             if (last) chosenId = last.id;
           }
 
           return {
             src,
-            title: img.title || `Product ${idx + 1}`,   // mirror server’s default pattern
-            category_id: toStringIdOrNull(chosenId),     // 👈 keep string IDs intact (CharField PK)
+            title: img.title || `Product ${idx + 1}`,
+            subcategory_id: toStringIdOrNull(chosenId),
           };
         })
       );
@@ -257,11 +302,7 @@ export default function FirstCarouselPage() {
         withFrontendKey({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            description,
-            images: validImages,
-          }),
+          body: JSON.stringify({ title, description, images: validImages }),
         })
       );
 
@@ -288,7 +329,7 @@ export default function FirstCarouselPage() {
 
         {/* Main Content */}
         <main className="flex-1 p-4 sm:p-6">
-          {/* Toggle Sidebar */}
+          {/* Header */}
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-2xl font-bold text-black">First Carousel</h1>
             <button
@@ -299,11 +340,9 @@ export default function FirstCarouselPage() {
             </button>
           </div>
 
-          {/* Title Input */}
+          {/* Title */}
           <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              First Carousel Title
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">First Carousel Title</label>
             <input
               type="text"
               placeholder="First Carousel Title"
@@ -313,11 +352,9 @@ export default function FirstCarouselPage() {
             />
           </div>
 
-          {/* Description Input */}
+          {/* Description */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              First Carousel Description
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">First Carousel Description</label>
             <input
               type="text"
               placeholder="First Carousel Description"
@@ -327,117 +364,106 @@ export default function FirstCarouselPage() {
             />
           </div>
 
-          {/* Image Inputs */}
+          {/* Image Rows */}
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-black">Carousel Images</h2>
-              <span className="text-xs text-gray-500">Link each image to a Category</span>
             </div>
 
-            {images.map((img, index) => (
-              <div key={index} className="bg-white p-4 rounded shadow-sm space-y-3">
-                <label className="block font-medium text-sm text-gray-700">
-                  Image #{index + 1}
-                </label>
+            {images.map((img, index) => {
+              // Row-specific sub options based on the row’s category filter
+              const rowSubOptions =
+                img.categoryFilterId
+                  ? subcategories.filter(sc => (sc.category_ids || []).includes(img.categoryFilterId))
+                  : subcategories;
 
-                {/* URL Input */}
-                <input
-                  type="text"
-                  placeholder="Image URL"
-                  value={img.type === 'url' ? img.value : ''}
-                  onChange={(e) => handleImageChange(index, 'value', e.target.value)}
-                  className="w-full border px-3 py-2 rounded text-black"
-                />
+              return (
+                <div key={index} className="bg-white p-4 rounded shadow-sm space-y-3">
+                  <label className="block font-medium text-sm text-gray-700">
+                    Image #{index + 1}
+                  </label>
 
-                {/* File Input */}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      handleImageChange(index, 'file', file);
-                      handleImageChange(index, 'type', 'file');  // keep explicit
-                    }
-                  }}
-                  className="w-full border px-3 py-2 rounded text-black"
-                />
+                  {/* URL Input */}
+                  <input
+                    type="text"
+                    placeholder="Image URL"
+                    value={img.type === 'url' ? img.value : ''}
+                    onChange={(e) => handleRowChange(index, { value: e.target.value, type: 'url', file: null })}
+                    className="w-full border px-3 py-2 rounded text-black"
+                  />
 
-                {/* Image Title */}
-                <input
-                  type="text"
-                  placeholder="Image Title"
-                  value={img.title}
-                  onChange={(e) => handleImageChange(index, 'title', e.target.value)}
-                  className="w-full border px-3 py-2 rounded text-black"
-                />
+                  {/* File Input */}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleRowChange(index, { file, type: 'file' });
+                    }}
+                    className="w-full border px-3 py-2 rounded text-black"
+                  />
+                  <p className="block font-medium text-sm text-gray-700" >Image Title</p>
+                  {/* Image Title (caption) */}
+                  <input
+                    type="text"
+                    placeholder="Image Title"
+                    value={img.title}
+                    onChange={(e) => handleRowChange(index, { title: e.target.value })}
+                    className="w-full border px-3 py-2 rounded text-black"
+                  />
 
-                {/* Category Dropdown + Text Input */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {/* Dropdown */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Category (Select)
-                    </label>
-                    <select
-                      value={img.categoryId}
-                      onChange={(e) => handleImageChange(index, 'categoryId', e.target.value)}
-                      className="w-full border border-[#891F1A] rounded px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#891F1A]"
-                    >
-                      <option value="">Select a Category</option>
-                      {categories.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Changing this also fills the text field with the same name.
-                    </p>
+                  {/* ⬇️ Per-image filters placed directly BELOW the caption */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Category filter (row-scoped) */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Category (Filter for this image)</label>
+                      <select
+                        className="w-full border rounded px-3 py-2 text-black"
+                        value={img.categoryFilterId}
+                        onChange={(e) => handleRowCategoryChange(index, e.target.value)}
+                      >
+                        <option value="">All Categories</option>
+                        {categories.map((cat) => (
+                          <option key={`cat::${cat.id}`} value={cat.id}>{cat.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Subcategory select (filtered by the row's category) */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Subcategory (Select)</label>
+                      <select
+                        className="w-full border border-[#891F1A] rounded px-3 py-2 text-sm text-black focus:outline-none focus:ring-2 focus:ring-[#891F1A]"
+                        value={img.subcategoryId}
+                        onChange={(e) => handleRowSubSelect(index, e.target.value)}
+                      >
+                        <option value="">Select a Subcategory</option>
+                        {rowSubOptions.map((sub) => (
+                          <option key={`subopt::${sub.id}`} value={sub.id}>{sub.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  {/* Text input (source of truth) */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Category (Text)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Type or confirm category name"
-                      value={img.categoryName}
-                      onChange={(e) => handleImageChange(index, 'categoryName', e.target.value)}
-                      className="w-full border px-3 py-2 rounded text-black"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">
-                      If empty, we auto-fill the most recently used category. On save, this field decides.
-                    </p>
-                  </div>
+                  {/* Image Preview */}
+                  {img.type === 'url' && img.value && (
+                    <div className="pt-2">
+                      <img
+                        src={img.value.startsWith('http') ? img.value : `${API_BASE_URL}${img.value}`}
+                        alt={`Preview ${index + 1}`}
+                        width={240}
+                        height={120}
+                        className="rounded border object-contain max-h-40"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = '/images/img1.jpg'; }}
+                      />
+                    </div>
+                  )}
                 </div>
-
-                {/* Image Preview */}
-                {img.type === 'url' && img.value && (
-                  <div className="pt-2">
-                    <img
-                      src={
-                        img.value.startsWith('http')
-                          ? img.value
-                          : `${API_BASE_URL}${img.value}`
-                      }
-                      alt={`Preview ${index + 1}`}
-                      width={240}
-                      height={120}
-                      className="rounded border object-contain max-h-40"
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src = '/images/img1.jpg';
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* Action Buttons */}
+          {/* Actions */}
           <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:gap-4 gap-3">
             <button
               onClick={handleAddImage}
@@ -455,9 +481,7 @@ export default function FirstCarouselPage() {
               onClick={handleRemoveLastImage}
               disabled={images.length <= 1}
               className={`px-4 py-2 text-white rounded w-full sm:w-auto transition-opacity ${
-                images.length <= 1
-                  ? 'bg-red-500 opacity-50 cursor-not-allowed'
-                  : 'bg-red-500 hover:bg-red-600'
+                images.length <= 1 ? 'bg-red-500 opacity-50 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600'
               }`}
             >
               🗑 Remove Last Section

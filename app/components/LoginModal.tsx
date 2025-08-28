@@ -33,6 +33,13 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
+// Icon URLs (as requested)
+const ICONS = {
+  user: "https://img.icons8.com/?size=100&id=ywULFSPkh4kI&format=png&color=000000",
+  email: "https://img.icons8.com/?size=100&id=85500&format=png&color=000000",
+  lock: "https://img.icons8.com/?size=100&id=64776&format=png&color=000000",
+};
+
 const LoginModal: React.FC<LoginModalProps> = ({
   isVisible,
   mode,
@@ -208,17 +215,14 @@ const LoginModal: React.FC<LoginModalProps> = ({
       <div className="w-full max-w-[860px] rounded-[20px] overflow-hidden bg-white flex flex-col md:flex-row shadow-[0_0_30px_rgba(0,0,0,0.2)]">
         {/* Left Panel */}
         <div className="hidden md:flex md:flex-1 bg-[#891f1a] text-white p-10 flex-col justify-center items-center text-center">
-          {/* h2 → Semi Bold (600) */}
           <h2 id="auth-heading" className="text-[26px] font-semibold mb-5">
             {isSignup ? "Welcome Back!" : "Hello, Friend!"}
           </h2>
-          {/* p → Regular (400) */}
           <p className="text-sm font-normal mb-5">
             {isSignup
               ? "To keep connected with us please login with your personal info"
               : "Enter your personal details and start your journey with us"}
           </p>
-          {/* button → Medium (500) */}
           <button
             onClick={toggleMode}
             className="bg-white text-black font-medium px-6 py-3 rounded-full text-base"
@@ -235,44 +239,80 @@ const LoginModal: React.FC<LoginModalProps> = ({
               : "bg-white text-black"
           }`}
         >
-          {/* h2 → Semi Bold (600) */}
           <h2 className="text-[22px] md:text-[26px] font-semibold mb-4 md:mb-5">
-            {isSignup ? "Create Account 🚀" : "Sign In 👋"}
+            {isSignup ? (
+              <>
+                Create Account{" "}
+                <img
+                  src={ICONS.user}
+                  alt="user icon"
+                  className="inline-block w-5 h-5 align-middle"
+                />
+              </>
+            ) : (
+              <>
+                Sign In{" "}
+                <img
+                  src={ICONS.lock}
+                  alt="lock icon"
+                  className="inline-block w-7 h-7 align-middle"
+                />
+              </>
+            )}
           </h2>
-          {/* p → Regular (400) */}
+
           <p className="text-sm font-normal mb-4 md:mb-5">
-            {isSignup
-              ? "or use your email for registration"
-              : "or use your account"}
+            {isSignup ? "or use your email for registration" : "or use your account"}
           </p>
 
           {isSignup && (
-            <input
-              ref={nameRef}
-              type="text"
-              placeholder="🧑 Name"
-              className={inputClass(isSignup)}
-              aria-label="Name"
-            />
+            <div className="relative w-full">
+              <img
+                src={ICONS.user}
+                alt="name icon"
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none"
+              />
+              <input
+                ref={nameRef}
+                type="text"
+                placeholder="Name"
+                className={`${inputClass(isSignup)} pl-10`}
+                aria-label="Name"
+              />
+            </div>
           )}
 
-          <input
-            ref={emailRef}
-            type="email"
-            placeholder="📧 Email"
-            className={inputClass(isSignup)}
-            aria-label="Email"
-            autoComplete="email"
-          />
+          <div className="relative w-full">
+            <img
+              src={ICONS.email}
+              alt="email icon"
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none"
+            />
+            <input
+              ref={emailRef}
+              type="email"
+              placeholder="Email"
+              className={`${inputClass(isSignup)} pl-10`}
+              aria-label="Email"
+              autoComplete="email"
+            />
+          </div>
 
-          <input
-            ref={passwordRef}
-            type="password"
-            placeholder="🔐 Password"
-            className={`${inputClass(isSignup)} mb-4`}
-            aria-label="Password"
-            autoComplete={isSignup ? "new-password" : "current-password"}
-          />
+          <div className="relative w-full">
+            <img
+              src={ICONS.lock}
+              alt="password icon"
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none"
+            />
+            <input
+              ref={passwordRef}
+              type="password"
+              placeholder="Password"
+              className={`${inputClass(isSignup)} pl-10 mb-4`}
+              aria-label="Password"
+              autoComplete={isSignup ? "new-password" : "current-password"}
+            />
+          </div>
 
           {!isSignup && (
             <button
@@ -291,14 +331,10 @@ const LoginModal: React.FC<LoginModalProps> = ({
                   e.currentTarget.src = "/images/default.jpg";
                 }}
               />
-              {/* span → Regular (400) */}
-              <span className="text-sm font-normal text-black">
-                Sign in with Google
-              </span>
+              <span className="text-sm font-normal text-black">Sign in with Google</span>
             </button>
           )}
 
-          {/* button → Medium (500) */}
           <button
             onClick={handleAuth}
             className="bg-[#ff5858] hover:bg-[#e94b4b] transition text-white font-medium px-6 py-3 rounded-full text-base mb-3 w-full"

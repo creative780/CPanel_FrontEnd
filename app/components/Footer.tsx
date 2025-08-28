@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import {
   FaFacebookF,
   FaInstagram,
@@ -29,6 +30,8 @@ const mapItems = [
   "Nearby Landmarks",
 ];
 
+type NavCategory = { id?: string | number; name: string; url: string };
+
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
@@ -42,30 +45,49 @@ export default function Footer() {
     map: false,
   });
 
-  const [categories, setCategories] = useState<string[]>([]);
+  const [categories, setCategories] = useState<NavCategory[]>([]);
 
   const toggleDropdown = (key: string) => {
     setOpenCols((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  // Keep for services/map only
   const slugify = (text: string) =>
     "/" + text.toLowerCase().replace(/[\s|]+/g, "-");
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/show_nav_items/`, withFrontendKey())
+    const controller = new AbortController();
+    const baseUrl = `${API_BASE_URL}`.replace(/\/+$/, "");
+
+    fetch(`${baseUrl}/api/show_nav_items/?_=${Date.now()}`, withFrontendKey({ signal: controller.signal }))
       .then((res) => res.json())
       .then((data) => {
-        const catNames = data
-          ?.map((category: any) => category.name)
-          .slice(0, 8);
-        setCategories(catNames || []);
+        const cats: NavCategory[] = Array.isArray(data)
+          ? data
+              .map((cat: any) => ({
+                id: cat?.id,
+                name: String(cat?.name ?? ""),
+                url: String(cat?.url ?? "").replace(/^\/+|\/+$/g, ""), // ensure no leading/trailing slash
+              }))
+              .filter((c) => c.name && c.url)
+              .slice(0, 8)
+          : [];
+        setCategories(cats);
       })
-      .catch((err) => console.error("Error fetching categories:", err));
+      .catch((err) => {
+        if (err?.name !== "AbortError") {
+          console.error("Error fetching categories:", err);
+        }
+      });
+
+    return () => controller.abort();
   }, []);
 
   const midPoint = Math.ceil(categories.length / 2);
   const firstCol = categories.slice(0, midPoint);
   const secondCol = categories.slice(midPoint);
+
+  const catHref = (cat: NavCategory) => `/home/${String(cat.url).replace(/^\/+/, "")}`;
 
   return (
     <footer
@@ -87,7 +109,6 @@ export default function Footer() {
             className="object-contain mb-3"
             onError={(e) => (e.currentTarget.src = "/images/default.jpg")}
           />
-          {/* p → Regular (400) */}
           <p className="text-sm leading-relaxed font-normal">
             Air plant banjo lyft occupy retro adaptogen indego.
           </p>
@@ -97,21 +118,20 @@ export default function Footer() {
         {categories.length > 0 && (
           <div className="w-full md:w-2/5 px-4 flex flex-col md:flex-row gap-6">
             <div className="flex-1">
-              {/* h2 → Semi Bold (600) */}
               <h2 className="font-semibold tracking-widest text-sm mb-3 uppercase">
                 Categories
               </h2>
               <ul className="space-y-2">
                 {firstCol.map((cat, idx) => (
-                  <li key={idx}>
-                    {/* a → Regular / Medium */}
-                    <a
-                      href={slugify(cat)}
+                  <li key={`f-cat-${cat.id ?? idx}`}>
+                    <Link
+                      href={catHref(cat)}
                       className="hover:underline font-normal"
-                      aria-label={`Go to ${cat}`}
+                      aria-label={`Go to ${cat.name}`}
+                      prefetch
                     >
-                      {cat}
-                    </a>
+                      {cat.name}
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -121,14 +141,15 @@ export default function Footer() {
                 <h2 className="sr-only">Categories Column 2</h2>
                 <ul className="space-y-2">
                   {secondCol.map((cat, idx) => (
-                    <li key={idx}>
-                      <a
-                        href={slugify(cat)}
+                    <li key={`s-cat-${cat.id ?? idx}`}>
+                      <Link
+                        href={catHref(cat)}
                         className="hover:underline font-normal"
-                        aria-label={`Go to ${cat}`}
+                        aria-label={`Go to ${cat.name}`}
+                        prefetch
                       >
-                        {cat}
-                      </a>
+                        {cat.name}
+                      </Link>
                     </li>
                   ))}
                 </ul>
@@ -139,7 +160,6 @@ export default function Footer() {
 
         {/* Column 4: Services (Toggle) */}
         <div className="w-full md:w-1/5 px-4">
-          {/* button → Medium (500) */}
           <button
             onClick={() => toggleDropdown("services")}
             className="flex items-center gap-2 font-medium tracking-widest text-sm mb-3 uppercase"
@@ -204,7 +224,6 @@ export default function Footer() {
 
       {/* ===================== Bottom Bar ===================== */}
       <div className="container mx-auto px-5 py-4 flex flex-col sm:flex-row justify-between items-center">
-        {/* p → Light (300) for footer info */}
         <p className="text-[#F3EFEE] text-sm text-center sm:text-left font-light">
           © 2025 CreativePrints — All rights reserved.
         </p>

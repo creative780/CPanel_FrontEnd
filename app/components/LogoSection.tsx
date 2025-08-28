@@ -528,7 +528,7 @@ export default function LogoSection() {
     <>
       <div
         style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
-        className="flex-col sm:flex-col lg:flex-row bg-white gap-8 items-start sm:items-start lg:items-center px-4 sm:px-6 lg:px-24 py-4 hidden md:flex"
+        className="flex-col sm:flex-col lg:flex-row bg-white gap-8 items-center justify-center px-4 sm:px-6 lg:px-24 py-4 hidden md:flex mx-auto"
       >
         <div className="flex flex-row flex-wrap w-full lg:w-[80%] gap-8 items-center">
           <Link href="/home">
@@ -560,13 +560,6 @@ export default function LogoSection() {
                 disabled={loading}
               />
 
-              <img
-                src="https://img.icons8.com/?size=100&id=Y6AAeSVIcpWt&format=png&color=000000"
-                alt=""
-                width={1}
-                height={40}
-                className="w-px h-8 sm:h-10 hidden sm:block"
-              />
               {/* button → 500 */}
               <button
                 type="button"
@@ -810,24 +803,14 @@ export default function LogoSection() {
               </button>
             ) : (
               <div className="flex items-center admin-panel gap-2">
-                {user?.photoURL ? (
+
                   <img
-                    src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
+                    src="https://img.icons8.com/?size=100&id=2oz92AdXqQrC&format=png&color=000000"
                     alt="User Profile"
                     width={20}
                     height={20}
                     className="ml-2"
                   />
-                ) : (
-                  <img
-                    src="https://img.icons8.com/?size=100&id=goPkRFTBcCa4&format=png&color=000000"
-                    alt="User"
-                    width={10}
-                    height={10}
-                    className="ml-2"
-                  />
-                )}
-
                 {/* username → 400 */}
                 <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">{username}</span>
 
@@ -836,14 +819,14 @@ export default function LogoSection() {
                   <button
                     onClick={handleLogout}
                     aria-label="Logout"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-7 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
+                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-6 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
                   >
                     <img
                     src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=FFFFFF"
                     alt="User"
                     width={20}
                     height={20}
-                    className=""
+                    className="-ml-5"
                   />
                     <span className="whitespace-nowrap text-sm font-medium text-white">Log Out</span>
                   </button>

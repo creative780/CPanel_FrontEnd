@@ -129,23 +129,6 @@ export default function Navbar() {
         aria-label="Primary"
         role="navigation"
       >
-        {/* Mobile Toggle */}
-        <div className="flex py-3 px-2 md:hidden">
-          <button
-            onClick={() => setMobileOpen(!mobileOpen)}
-            className="p-2 rounded-md text-gray-700 hover:bg-gray-100 font-medium"
-            aria-label="Toggle navigation"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" strokeWidth={2}>
-              {mobileOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-              )}
-            </svg>
-          </button>
-        </div>
-
         {/* Navigation Links */}
         <div className={`${mobileOpen ? "flex flex-col py-2 space-y-1" : "hidden"} md:flex md:justify-center w-full`}>
           <div className="flex flex-wrap flex-col md:flex-row gap-[clamp(0.35rem,0.6vw,1rem)] py-2 md:py-3">
@@ -180,7 +163,7 @@ export default function Navbar() {
           <section
             onMouseEnter={handleDropdownEnter}
             onMouseLeave={handleDropdownLeave}
-            className={`fixed left-1/2 top-[200px] -translate-x-1/2 z-50 w-full max-w-[1400px] px-2 transition-all duration-300 ease-out ${
+            className={`fixed top-[200px] left-0 right-0 z-50 w-[97%] mx-auto px-2 transition-all duration-300 ease-out ${
               dropdownVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
             }`}
             aria-label="Category mega menu"
