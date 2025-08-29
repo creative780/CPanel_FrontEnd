@@ -17,33 +17,7 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-/* ===================== API TYPES (from your backend response) =====================
-
-Response: Array<CategoryRaw>
-CategoryRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string,
-  subcategories: Array<SubcategoryRaw>
-}
-
-SubcategoryRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string,
-  products: Array<ProductRaw>
-}
-
-ProductRaw = {
-  id: string|number,
-  name: string,
-  images: string[],
-  url: string
-}
-===================================================================================*/
-
+/* ===================== API TYPES (from your backend response) ===================== */
 type ID = string | number;
 
 interface ProductRaw {
@@ -110,32 +84,45 @@ export default function LogoSection() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Auth state (kept as-is from your original)
+  // Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
       if (firebaseUser) {
-        let displayName: string | null = null;
+        let displayName: string | null =
+          // ✅ PRIORITY 1: Google displayName (immediate, no network)
+          firebaseUser.displayName || null;
 
-        try {
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            displayName = (data as any).username;
+        // ✅ PRIORITY 2: Firestore profile (users/<uid>.username)
+        if (!displayName) {
+          try {
+            const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              displayName = (data as any).username || null;
+            }
+          } catch {
+            /* ignore */
           }
-        } catch {}
+        }
 
+        // ✅ PRIORITY 3: Backend /api/show-user/ (user_id match)
         if (!displayName) {
           try {
             const res = await fetch(`${API_BASE_URL}/api/show-user/`, withFrontendKey());
             const data = await res.json();
             const found = data.users?.find((u: any) => u.user_id === firebaseUser.uid);
-            displayName = found?.name || null;
-          } catch {}
+            // handle both name/first_name just in case
+            displayName = found?.name || found?.first_name || null;
+          } catch {
+            /* ignore */
+          }
         }
 
+        // ✅ PRIORITY 4: Email prefix
         if (!displayName) displayName = firebaseUser.email?.split("@")[0] || "User";
+
         setUsername(displayName);
       } else {
         setUsername(null);
@@ -209,7 +196,7 @@ export default function LogoSection() {
         position: "right",
         backgroundColor: "linear-gradient(to right, #ff5f6d, #ffc371)",
       }).showToast();
-    } catch (error: any) {
+    } catch {
       alert("Error during logout.");
     }
   };
@@ -260,7 +247,6 @@ export default function LogoSection() {
   const norm = (s: string) =>
     s.toLowerCase().normalize("NFKD").replace(/\p{Diacritic}/gu, "");
 
-  // Basic Damerau–Levenshtein for short strings (fast enough here)
   function editDistance(a: string, b: string) {
     const al = a.length;
     const bl = b.length;
@@ -311,7 +297,6 @@ export default function LogoSection() {
     return 1 - dist / Math.max(1, maxLen); // 0..1
   };
 
-  // Score arrays
   type Scored<T> = { item: T; score: number };
 
   function topMatches<T extends { name: string }>(
@@ -332,7 +317,6 @@ export default function LogoSection() {
     return results.slice(0, limit);
   }
 
-  // Determine intent (category, subcategory, product) by best score
   function detectIntent(q: string) {
     const cm = topMatches(cats, q, 0.55, 5);
     const sm = topMatches(subs, q, 0.5, 5);
@@ -342,7 +326,6 @@ export default function LogoSection() {
     const bestSub = sm[0];
     const bestProd = pm[0];
 
-    // Prefer direct includes > fuzzy if close
     const includesBoost = (name: string) => (norm(name).includes(norm(q)) ? 0.05 : 0);
 
     const catScore = bestCat ? bestCat.score + includesBoost(bestCat.item.name) : 0;
@@ -361,30 +344,6 @@ export default function LogoSection() {
     // fallback: show broad matches grouped by category
     return { type: "broad" as const, target: null, suggestions: [...cm, ...sm, ...pm].slice(0, 3) };
   }
-
-  /* ========================= Build Result Collections ========================= */
-
-  // For infinite-ish loading
-  const ITEMS_PER_LOAD = 20;
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const [loadedCount, setLoadedCount] = useState(ITEMS_PER_LOAD);
-  useEffect(() => setLoadedCount(ITEMS_PER_LOAD), [debouncedQuery]); // reset on new query
-
-  useEffect(() => {
-    function onScroll() {
-      const el = scrollerRef.current;
-      if (!el) return;
-      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
-      if (nearBottom) {
-        setLoadedCount((c) => c + ITEMS_PER_LOAD);
-      }
-    }
-    const el = scrollerRef.current;
-    if (el) el.addEventListener("scroll", onScroll);
-    return () => {
-      if (el) el.removeEventListener("scroll", onScroll);
-    };
-  }, []);
 
   const intent = useMemo(() => detectIntent(debouncedQuery), [debouncedQuery, cats, subs, prods]);
 
@@ -584,7 +543,7 @@ export default function LogoSection() {
                 role="listbox"
                 aria-label="Search suggestions"
               >
-                {/* Status / badges header (acts like a minor heading → keep 600) */}
+                {/* Status / badges header */}
                 <div className="px-4 pt-3 text-xs text-gray-500 font-light">
                   {loading && "Fetching catalog…"}
                   {!loading && !error && quickBadges.length > 0 && "Quick categories:"}
@@ -595,7 +554,6 @@ export default function LogoSection() {
                 {/* Real category badges only (from API) */}
                 {quickBadges.length > 0 && (
                   <div className="px-4 pb-3 pt-2 flex flex-wrap gap-2 border-b border-gray-100">
-                    {/* nav/chips → treat as navigation items → 500 */}
                     {quickBadges.slice(0, 12).map((b) => (
                       <button
                         key={b}
@@ -640,7 +598,6 @@ export default function LogoSection() {
                           if (it.kind === "header") {
                             return (
                               <li key={it.key} className="py-2 bg-white text-black top-0 z-10">
-                                {/* section header → 600 */}
                                 <div className="px-4 py-1 text-xs font-semibold tracking-wide uppercase text-red-700">
                                   {it.text}
                                 </div>
@@ -688,11 +645,9 @@ export default function LogoSection() {
                                   height={56}
                                 />
                                 <div className="min-w-0 flex-1">
-                                  {/* product name → 500 */}
                                   <span className="block font-medium text-sm sm:text-base text-gray-900 truncate">
                                     {p.name}
                                   </span>
-                                  {/* meta → 400 / inner span also 400 */}
                                   <p className="text-xs sm:text-sm text-gray-600 font-normal line-clamp-2">
                                     {p.subName} • <span className="text-gray-500 font-normal">{p.catName}</span>
                                   </p>
@@ -723,34 +678,33 @@ export default function LogoSection() {
 
         {/* Right-side links */}
         <div className="flex flex-row gap-8 px-1 pt-2 sm:pt-0 flex-wrap sm:flex-nowrap items-center justify-center sm:justify-start">
-        <Link
-                href="/checkout2"
-                className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
-              >
-                 <img
-                    src="https://img.icons8.com/?size=100&id=ii6Lr4KivOiE&format=png&color=FFFFFF"
-                    alt="Help Centre icon"
-                    width={20}
-                    height={20}
-                    className="-ml-5 w-5 h-5 left-3"
-                  />
-                  <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Cart</span>
-              </Link>
+          <Link
+            href="/checkout2"
+            className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md"
+          >
+            <img
+              src="https://img.icons8.com/?size=100&id=ii6Lr4KivOiE&format=png&color=FFFFFF"
+              alt="Help Centre icon"
+              width={20}
+              height={20}
+              className="-ml-5 w-5 h-5 left-3"
+            />
+            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Cart</span>
+          </Link>
 
-                <Link
-                    href="/blog"
-                    className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md -ml-5"
-                  >
-                     <img
-                        src="https://img.icons8.com/?size=100&id=WX84CKOI9WcJ&format=png&color=FFFFFF"
-                        alt="Help Centre icon"
-                        width={20}
-                        height={20}
-                        className="-ml-5 w-5 h-5 left-3"
-                      />
-                   
-                     <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Blog</span>
-                  </Link>
+          <Link
+            href="/blog"
+            className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-10 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md -ml-5"
+          >
+            <img
+              src="https://img.icons8.com/?size=100&id=WX84CKOI9WcJ&format=png&color=FFFFFF"
+              alt="Help Centre icon"
+              width={20}
+              height={20}
+              className="-ml-5 w-5 h-5 left-3"
+            />
+            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Blog</span>
+          </Link>
 
           <Link href="/contact">
             <div className="flex gap-3 items-center flex-nowrap">
@@ -761,7 +715,6 @@ export default function LogoSection() {
                 height={20}
                 className="-ml-5 w-5 h-5 left-3"
               />
-              {/* link text → 400/500; make it 500 as nav */}
               <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
                 Contact
               </span>
@@ -776,7 +729,6 @@ export default function LogoSection() {
               height={21}
               className="w-[21px] h-[21px]"
             />
-            {/* nav link → 500 */}
             <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
               <a href="/about">About</a>
             </span>
@@ -797,37 +749,35 @@ export default function LogoSection() {
                     height={20}
                     className="mr-1"
                   />
-                  {/* span → 400 */}
                   <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">Login</span>
                 </div>
               </button>
             ) : (
               <div className="flex items-center admin-panel gap-2">
-
-                  <img
-                    src="https://img.icons8.com/?size=100&id=2oz92AdXqQrC&format=png&color=000000"
-                    alt="User Profile"
-                    width={20}
-                    height={20}
-                    className="ml-2"
-                  />
-                {/* username → 400 */}
-                <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">{username}</span>
+                <img
+                  src="https://img.icons8.com/?size=100&id=2oz92AdXqQrC&format=png&color=000000"
+                  alt="User Profile"
+                  width={20}
+                  height={20}
+                  className="ml-2"
+                />
+                <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
+                  {username}
+                </span>
 
                 <div className="flex items-center gap-3">
-                  {/* buttons → 500 */}
                   <button
                     onClick={handleLogout}
                     aria-label="Logout"
                     className="cursor-pointer flex items-center gap-2 bg-[#8B1C1C] hover:bg-[#6f1414] text-white text-xs font-medium px-6 py-1.5 rounded-full transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none"
                   >
                     <img
-                    src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=FFFFFF"
-                    alt="User"
-                    width={20}
-                    height={20}
-                    className="-ml-5"
-                  />
+                      src="https://img.icons8.com/?size=100&id=NF9Ee0wdJRR1&format=png&color=FFFFFF"
+                      alt="User"
+                      width={20}
+                      height={20}
+                      className="-ml-5"
+                    />
                     <span className="whitespace-nowrap text-sm font-medium text-white">Log Out</span>
                   </button>
                 </div>

@@ -124,10 +124,11 @@ const Modal = ({
   const [formData, setFormData] = useState<any>({
     title: "",
     description: "",
-    // sku is managed internally (hidden); filled on load (edit) or generated once on save (create)
     sku: "",
     category: "",
     subcategory: "",
+    rating: "", 
+    ratingCount: "",    
     brand: "",
     imageAlt: "",
     videoUrl: "",
@@ -211,6 +212,8 @@ const Modal = ({
         sku: "",
         category: "",
         subcategory: "",
+        rating: "",
+        ratingCount: "",
         brand: "",
         imageAlt: "",
         videoUrl: "",
@@ -344,9 +347,11 @@ const Modal = ({
           ...prev,
           title: basic.name || "",
           description: basic.fit_description || "",
-          sku: basic.id || "", // kept internally; field hidden from UI in edit mode
+          sku: basic.id || "",
           category: "",
           subcategory: basic.subcategory?.id || "",
+          rating: typeof basic.rating === "number" ? String(basic.rating) : "",
+          ratingCount: typeof basic.rating_count === "number" ? String(basic.rating_count) : "",
           brand: basic.brand_title || "",
           imageAlt: seo.image_alt_text || "",
           videoUrl: basic.video_url || "",
@@ -776,6 +781,8 @@ const Modal = ({
         brand_title: formData.brand,
         price: parseFloat(formData.normalPrice) || 0,
         discounted_price: parseFloat(formData.discountedPrice) || 0,
+         ...(formData.rating !== "" ? { rating: Number(formData.rating) } : {}),
+         ...(formData.ratingCount !== "" ? { rating_count: Number(formData.ratingCount) } : {}),
         tax_rate: parseFloat(formData.taxRate) || 0,
         price_calculator: (formData as any).price_calculator ?? formData.priceCalculator,
         video_url: formData.videoUrl,
@@ -1075,7 +1082,58 @@ const Modal = ({
                   required
                 />
                 {errors.brand && <p className="text-red-600 sm:col-span-2">{errors.brand}</p>}
+
+                 <div className="relative">
+                <select
+                  name="rating"
+                  className="input-primary w-full pr-10 custom-select"
+                  value={formData.rating}
+                  onChange={(e) => setFormData((p: any) => ({ ...p, rating: e.target.value }))}
+                >
+                  <option value="">Select Rating</option>
+                  <option value="5">5.0</option>
+                  <option value="4.5">4.5</option>
+                  <option value="4">4.0</option>
+                  <option value="3.5">3.5</option>
+                  <option value="3">3.0</option>
+                  <option value="2.5">2.5</option>
+                  <option value="2">2.0</option>
+                  <option value="1.5">1.5</option>
+                  <option value="1">1.0</option>
+                  <option value="0.5">0.5</option>
+                  <option value="0">0</option>
+                </select>
+                <svg
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-500"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
               </div>
+               <input
+                name="ratingCount"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Rating Count"
+                className="input-primary"
+                value={formData.ratingCount}
+                onChange={(e) =>
+                  setFormData((p: any) => ({
+                    ...p,
+                    ratingCount: e.target.value === "" ? "" : String(Math.max(0, Number(e.target.value))),
+                  }))
+                }
+              />
+
+              </div>
+              {/* NEW: Rating + Rating Count (next to Subcategory) */}
+             
+
+             
             </section>
 
             {/* Images & Media */}

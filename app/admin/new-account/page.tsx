@@ -1,14 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminSidebar from '../components/AdminSideBar';
-import AdminAuthGuard from '../components/AdminAuthGaurd';
 import Modal from '../components/Modal';
-import { formatDistanceToNow } from 'date-fns'; // ✅ fixed import
+import { formatDistanceToNow } from 'date-fns';
 import { ToastContainer, toast } from 'react-toastify';
 import Checkbox from '@mui/material/Checkbox';
 import 'react-toastify/dist/ReactToastify.css';
 import { API_BASE_URL } from '../../utils/api';
+import AdminAuthGuard from '../components/AdminAuthGaurd';
 
 type AdminUser = {
   admin_id: string;
@@ -20,7 +20,6 @@ type AdminUser = {
   created_at: string;
 };
 
-// 🔐 Frontend key helper
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
 const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   const headers = new Headers(init.headers || {});
@@ -28,8 +27,6 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-// NOTE: We keep only "Blog" visible here.
-// "Blog View" will be auto-added under the hood when saving.
 const sidebarLinks = [
   'Dashboard', 'Products Section', 'Blog', 'Settings', 'First Carousel',
   'Media Library', 'Notifications', 'Testimonials', 'Second Carousel',
@@ -52,9 +49,12 @@ const rolePermissionsMap: { [key: string]: string[] } = {
 
 const normalizePermissions = (perms: string[]) => {
   const next = new Set(perms);
-  if (next.has('Blog')) next.add('Blog View'); // invisible auto-grantx
+  if (next.has('Blog')) next.add('Blog View');
   return Array.from(next);
 };
+
+// 🛡️ DUPLICATE GUARD: helpers
+const norm = (s: string) => s.trim().toLowerCase();
 
 export default function AdminNewAccountPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -69,6 +69,8 @@ export default function AdminNewAccountPage() {
     permissions: [] as string[],
   });
 
+  const [saving, setSaving] = useState(false); // small UX win
+
   useEffect(() => {
     const fetchAdmins = async () => {
       try {
@@ -80,13 +82,20 @@ export default function AdminNewAccountPage() {
         } else {
           toast.error('❌ Unexpected response format');
         }
-      } catch (err) {
+      } catch {
         toast.error('❌ Failed to fetch admin users');
       }
     };
 
     fetchAdmins();
   }, []);
+
+  // 🛡️ DUPLICATE GUARD: live duplicate detection (case-insensitive + trimmed)
+  const usernameDuplicate = useMemo(() => {
+    if (!formData.username) return false;
+    const target = norm(formData.username);
+    return users.some(u => norm(u.admin_name) === target);
+  }, [formData.username, users]);
 
   const togglePermission = (label: string) => {
     setFormData((prev) => {
@@ -101,28 +110,68 @@ export default function AdminNewAccountPage() {
   };
 
   const handleSaveUser = async () => {
-    if (!formData.username || !formData.password || !formData.role) {
+    const username = formData.username.trim();
+    const password = formData.password.trim();
+    const role = formData.role.trim();
+
+    if (!username || !password || !role) {
       toast.error('❌ Username, password and role are required');
       return;
     }
 
+    setSaving(true);
     try {
-     const access_pages = normalizePermissions(formData.permissions);
+      // 🛡️ DUPLICATE GUARD: preflight refresh to avoid race conditions
+      try {
+        const ref = await fetch(`${API_BASE_URL}/api/show-admin/`, withFrontendKey());
+        const refData = await ref.json();
+        if (refData?.success && Array.isArray(refData.admins)) {
+          setUsers(refData.admins);
+          const dupNow = refData.admins.some((u: AdminUser) => norm(u.admin_name) === norm(username));
+          if (dupNow) {
+            toast.error('🚫 Username already exists. Pick a different one.');
+            return;
+          }
+        }
+      } catch {
+        // If preflight fails, still proceed but we’ll rely on server validation below
+      }
+
+      if (usernameDuplicate) {
+        toast.error('🚫 Username already exists. Pick a different one.');
+        return;
+      }
+
+      const access_pages = normalizePermissions(formData.permissions);
 
       const res = await fetch(`${API_BASE_URL}/api/save-admin/`, withFrontendKey({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          admin_name: formData.username,
-          password: formData.password,
-          role_name: formData.role,
+          admin_name: username,
+          password,
+          role_name: role,
           access_pages,
         }),
       }));
 
+      // 🛡️ DUPLICATE GUARD: handle server-side uniqueness error (409 or custom)
+      if (!res.ok) {
+        if (res.status === 409) {
+          toast.error('🚫 Username already exists (server).');
+          return;
+        }
+      }
+
       const result = await res.json();
 
-      if (!res.ok || !result.success) {
+      if (!result.success) {
+        // Some backends send { success:false, error:'duplicate' }
+        const msg = (result.error || '').toString().toLowerCase();
+        if (msg.includes('exist') || msg.includes('duplicate') || res.status === 409) {
+          toast.error('🚫 Username already exists.');
+          return;
+        }
         toast.error('❌ Error saving admin');
         return;
       }
@@ -139,8 +188,10 @@ export default function AdminNewAccountPage() {
       } else {
         toast.error('❌ Invalid response format after save');
       }
-    } catch (error) {
+    } catch {
       toast.error('❌ Error saving admin');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -162,7 +213,7 @@ export default function AdminNewAccountPage() {
       } else {
         toast.error(`❌ ${result.error || 'Failed to delete admin'}`);
       }
-    } catch (err) {
+    } catch {
       toast.error('❌ Server error during deletion');
     } finally {
       setConfirmDeleteOpen(false);
@@ -247,6 +298,10 @@ export default function AdminNewAccountPage() {
                       value={formData.username}
                       onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     />
+                    {/* 🛡️ DUPLICATE GUARD: inline feedback */}
+                    {formData.username.trim() && usernameDuplicate && (
+                      <p className="mt-1 text-xs text-red-600">This username is already taken.</p>
+                    )}
                   </div>
 
                   <div className="mb-4">
@@ -266,9 +321,7 @@ export default function AdminNewAccountPage() {
                       onChange={(e) => {
                         const role = e.target.value;
                         const basePerms = rolePermissionsMap[role] || [];
-                        // ✅ normalize on role change too
                         const normalized = normalizePermissions(basePerms);
-                        // Keep UI list clean (no "Blog View" showing as a checkbox)
                         setFormData({ ...formData, role, permissions: normalized.filter(p => p !== 'Blog View') });
                       }}
                     >
@@ -308,9 +361,11 @@ export default function AdminNewAccountPage() {
                     </button>
                     <button
                       onClick={handleSaveUser}
-                      className="bg-[#891F1A] text-white px-4 py-2 rounded hover:bg-[#6d1915]"
+                      className="bg-[#891F1A] text-white px-4 py-2 rounded hover:bg-[#6d1915] disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={saving || usernameDuplicate || !formData.username.trim() || !formData.password.trim() || !formData.role.trim()}
+                      title={usernameDuplicate ? 'Username already exists' : ''}
                     >
-                      Save User
+                      {saving ? 'Saving…' : 'Save User'}
                     </button>
                   </div>
                 </div>

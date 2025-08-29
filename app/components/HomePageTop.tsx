@@ -5,6 +5,9 @@ import Link from 'next/link';
 import Image from 'next/image';
 import LoginModal from '../components/LoginModal';
 import { API_BASE_URL } from '../utils/api';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 
 /** FRONTEND KEY helper (adds header X-Frontend-Key) */
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || '').trim();
@@ -59,7 +62,8 @@ export default function MobileTopBar() {
 
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [modalMode, setModalMode] = useState<'signin' | 'signup'>('signin');
-  const [user, setUser] = useState<string | null>(null);
+
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string>('');
 
   const nameRef = useRef<HTMLInputElement>(null);
@@ -197,15 +201,64 @@ export default function MobileTopBar() {
   const closeModal = () => setIsModalVisible(false);
   const toggleModalMode = () => setModalMode(prev => (prev === 'signin' ? 'signup' : 'signin'));
 
+  // ✅ Firebase auth listener (same priority order as desktop header)
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setFirebaseUser(u);
+
+      if (!u) {
+        setUsername('');
+        return;
+      }
+
+      // Priority 1: Google displayName
+      let displayName: string | null = u.displayName || null;
+
+      // Priority 2: Firestore
+      if (!displayName) {
+        try {
+          const snap = await getDoc(doc(db, 'users', u.uid));
+          if (snap.exists()) {
+            displayName = (snap.data() as any).username || null;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // Priority 3: Backend
+      if (!displayName) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/show-user/`, withFrontendKey());
+          const data = await res.json();
+          const found = data.users?.find((x: any) => x.user_id === u.uid);
+          displayName = found?.name || found?.first_name || null;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // Priority 4: email prefix
+      if (!displayName) displayName = u.email?.split('@')[0] || 'User';
+
+      setUsername(displayName);
+    });
+
+    return () => unsub();
+  }, []);
+
   const handleAuth = async () => {
-    if (modalMode === 'signin') {
-      setUser('user123');
-      setUsername('John Doe');
-    } else {
-      setUser('newuser456');
-      setUsername(nameRef.current?.value || 'New User');
-    }
+    // Modal closes itself; the auth state change will update username.
     closeModal();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setUsername('');
+    } catch {
+      /* ignore */
+    }
   };
 
   /* =============================== Derivations =============================== */
@@ -485,7 +538,6 @@ export default function MobileTopBar() {
             className="h-8 w-auto object-contain"
           />
         </div>
-        {/* phone → nav text: Medium (500) */}
         <div className="text-sm font-medium">+971-123-456-789</div>
       </div>
 
@@ -595,7 +647,6 @@ export default function MobileTopBar() {
                           if (it.kind === 'header') {
                             return (
                               <li key={it.key} className="py-1 bg-white text-black sticky top-0 z-10">
-                                {/* h3 → Medium (500) but visually small */}
                                 <h3 className="px-3 py-1 text-[11px] font-medium uppercase text-red-700">
                                   {it.text}
                                 </h3>
@@ -640,11 +691,9 @@ export default function MobileTopBar() {
                                     height={48}
                                   />
                                   <div className="min-w-0 flex-1">
-                                    {/* product name → Medium (500) */}
                                     <span className="block font-medium text-sm text-gray-900 truncate">
                                       {p.name}
                                     </span>
-                                    {/* meta → small Light (300) */}
                                     <small className="text-[11px] text-gray-600 font-light">
                                       {p.subName} • <span className="text-gray-500">{p.catName}</span>
                                     </small>
@@ -674,7 +723,6 @@ export default function MobileTopBar() {
 
           {/* Categories */}
           <nav className="border-b border-gray-300 pb-4 px-4" aria-label="Mobile categories">
-            {/* h2 → Semi Bold (600) */}
             <h2 className="text-base font-semibold mb-2">Categories</h2>
             <ul className="space-y-2">
               {navData.map((cat) => {
@@ -683,7 +731,6 @@ export default function MobileTopBar() {
                 return (
                   <li key={String(cat.id)}>
                     <div className="flex justify-between items-center">
-                      {/* a (nav link) → Medium (500) */}
                       <Link
                         href={catUrl}
                         className="font-medium hover:text-red-700"
@@ -734,21 +781,18 @@ export default function MobileTopBar() {
 
           {/* Info and Actions */}
           <section className="flex flex-col space-y-3 px-4 py-4 text-sm">
-            {/* label text → Regular (400) */}
             <p className="font-normal">
               <span className="font-medium">Email:</span> hi@printshop.com
             </p>
-            {/* Primary nav links → Medium (500) */}
             <Link href="/home" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Home</Link>
             <Link href="/about" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>About</Link>
             <Link href="/checkout2" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>View Cart</Link>
             <Link href="/blog" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Blog</Link>
             <Link href="/contact" className="hover:text-gray-700 font-medium" onClick={() => setIsMenuOpen(false)}>Contact</Link>
-            {/* location → small Light (300) */}
             <small className="font-light">UAE</small>
 
             <div className="login-signup">
-              {!user ? (
+              {!firebaseUser ? (
                 <button onClick={() => openModal('signin')} className="flex items-center py-1.5 w-full font-medium">
                   <Image
                     src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
@@ -761,17 +805,24 @@ export default function MobileTopBar() {
                   <span className="text-sm text-black">Login</span>
                 </button>
               ) : (
-                <div className="flex items-center py-1.5">
-                  <Image
-                    src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
-                    alt="User"
-                    width={20}
-                    height={20}
-                    loading="lazy"
-                    className="mr-2"
-                  />
-                  {/* username → Regular (400) */}
-                  <span className="text-sm text-black font-normal">{username}</span>
+                <div className="flex items-center py-1.5 justify-between">
+                  <div className="flex items-center">
+                    <Image
+                      src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/icons/person.svg"
+                      alt="User"
+                      width={20}
+                      height={20}
+                      loading="lazy"
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-black font-normal">{username}</span>
+                  </div>
+                  <button
+                    onClick={handleLogout}
+                    className="ml-3 text-xs px-3 py-1 rounded-full bg-[#8B1C1C] text-white font-medium hover:bg-[#6f1414]"
+                  >
+                    Logout
+                  </button>
                 </div>
               )}
             </div>

@@ -19,6 +19,8 @@ import Footer from "../../../../../components/Footer";
 import MobileTopBar from "../../../../../components/HomePageTop";
 import { API_BASE_URL } from "../../../../../utils/api";
 import { ChatBot } from "../../../../../components/ChatBot";
+import Link from "next/link";
+import HomePageTop from "../../../../../components/HomePageTop";
 
 // 🔐 Frontend key helper (adds X-Frontend-Key to requests)
 const FRONTEND_KEY = (process.env.NEXT_PUBLIC_FRONTEND_KEY || "").trim();
@@ -251,6 +253,10 @@ export default function ProductDetailPage() {
               const fullDetails = allProductsData.find(
                 (item: any) => `${item.id}` === `${p.id}`
               );
+
+              const rating = Number(p?.rating ?? fullDetails?.rating ?? 0);
+              const rating_count = Number(p?.rating_count ?? fullDetails?.rating_count ?? 0);
+
               return {
                 ...p,
                 image:
@@ -263,6 +269,8 @@ export default function ProductDetailPage() {
                 stock_quantity: fullDetails?.stock_quantity || 0,
                 category_slug: foundCategory?.url,
                 subcategory_slug: foundSubCategory?.url,
+                rating,
+                rating_count,
               };
             });
 
@@ -335,30 +343,145 @@ export default function ProductDetailPage() {
     setSelectedAttrOptions((prev) => ({ ...prev, [attrId]: optionId }));
   };
 
+  const StarRating = ({ rating, count = 0 }: { rating: number; count?: number }) => {
+    const fullStarUrl =
+      "https://img.icons8.com/?size=100&id=Jy3TrLVOr9Ac&format=png&color=891F1A";
+    const halfStarUrl =
+      "https://img.icons8.com/?size=100&id=m6oA37oGaOEP&format=png&color=891F1A";
+    const emptyStarUrl =
+      "https://img.icons8.com/?size=100&id=103&format=png&color=891F1A";
+
+    // Clamp rating between 0–5, round to nearest 0.5
+    const r = Math.max(0, Math.min(5, Math.round((Number(rating) || 0) * 2) / 2));
+
+    return (
+      <div className="flex items-center gap-0.5 mt-1" aria-label={`Rating: ${r} out of 5`}>
+        {Array.from({ length: 5 }).map((_, i) => {
+          const idx = i + 1;
+          if (r >= idx) {
+            return (
+              <img
+                key={i}
+                src={fullStarUrl}
+                alt="Full star"
+                className="w-4 h-4"
+                loading="lazy"
+              />
+            );
+          }
+          if (r >= idx - 0.5) {
+            return (
+              <img
+                key={i}
+                src={halfStarUrl}
+                alt="Half star"
+                className="w-4 h-4"
+                loading="lazy"
+              />
+            );
+          }
+          return (
+            <img
+              key={i}
+              src={emptyStarUrl}
+              alt="Empty star"
+              className="w-4 h-4"
+              loading="lazy"
+            />
+          );
+        })}
+        <span className="text-xs text-gray-600 ml-1">({count})</span>
+      </div>
+    );
+  };
+
   const isSelected = (attrId: string, optionId: string) =>
     selectedAttrOptions[attrId] === optionId;
 
-  if (loading) {
-    return (
+    if (loading) {
+      return (
       <div
-        className="min-h-screen flex items-center justify-center"
-        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
+          className="bg-white overflow-x-hidden"
+          style={{ fontFamily: 'var(--font-poppins), Arial, sans-serif' }}
+        >
+          <Header />
+          <LogoSection />
+          <HomePageTop />
+        </div>
+      );
+    }
+  
+    if (!product) {
+      return (
+    <div
+        className="bg-white overflow-x-hidden lg:overflow-y-hidden"
+        style={{ fontFamily: 'var(--font-poppins), Arial, sans-serif' }}
       >
-        Loading...
+        <Header />
+        <LogoSection />
+        <HomePageTop />
+  
+        <main
+          className="grid min-h-[100svh] justify-center mt-10 px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-24"
+          aria-labelledby="page-title"
+        >
+          <section className="text-center max-w-2xl w-full">
+            {/* p → Regular */}
+            <p className="mb-4 sm:mb-6 tracking-[0.25em] text-[10px] sm:text-xs font-normal text-[#891F1A]">
+              OOPS! PAGE NOT FOUND
+            </p>
+  
+            {/* h1 → Bold */}
+            <h1
+              id="page-title"
+              aria-label="404"
+              className="relative mx-auto mb-4 sm:mb-6 flex items-center justify-center font-bold leading-none text-[#891F1A] select-none"
+            >
+              {/* span digits → Bold */}
+              <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold -mr-2 sm:-mr-4 text-[clamp(6rem,22vw,12rem)]">
+                4
+              </span>
+              <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold -mr-2 sm:-mr-4 text-[clamp(6rem,22vw,12rem)]">
+                0
+              </span>
+              <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold text-[clamp(6rem,22vw,12rem)]">
+                4
+              </span>
+            </h1>
+  
+            {/* p → Regular */}
+            <p className="mx-auto max-w-xl text-sm sm:text-base text-[#891F1A] font-normal px-2">
+              WE ARE SORRY, BUT THE PAGE YOU REQUESTED WAS NOT FOUND. 
+            </p>
+            {/* p → Regular */}
+            <p className="mx-auto max-w-xl text-sm sm:text-base text-[#891F1A] font-normal px-2">
+              It looks like you've navigated to the wrong URL.
+            </p>
+  
+            <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 sm:gap-4 w-full">
+              {/* a (Link) → Regular */}
+              <Link
+                href="/"
+                className="inline-flex justify-center rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-normal text-[#891F1A] transition hover:bg-red-500 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+              >
+                Go to Home
+              </Link>
+  
+              {/* button → Medium */}
+              <button
+                type="button"
+                onClick={() => history.back()}
+                className="inline-flex justify-center rounded-xl bg-[#891F1A] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+              >
+                Go Back
+              </button>
+            </div>
+          </section>
+        </main>
+        <Footer />
       </div>
-    );
-  }
-
-  if (!product) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center text-red-500"
-        style={{ fontFamily: 'var(--font-poppins), Arial, Helvetica, sans-serif' }}
-      >
-        Product not found.
-      </div>
-    );
-  }
+      );
+    }
 
   return (
     <>
@@ -382,58 +505,64 @@ export default function ProductDetailPage() {
         <div className="max-w-6xl mx-auto mt-10 px-4 grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Image Section */}
           <div className="space-y-4">
-            <div
-              className="relative bg-gray-100 rounded-2xl overflow-hidden aspect-[5/5] group"
-              onTouchStart={handleTouchStart}
-              onTouchMove={handleTouchMove}
-              onTouchEnd={handleTouchEnd}
-            >
-              <img
-                src={images[currentImageIndex] || "/images/img1.jpg"}
-                alt={product.name}
-                className="w-full h-full object-cover"
-                onError={(e) => (e.currentTarget.src = "/images/img1.jpg")}
-              />
-              <button
-                onClick={prevImage}
-                className="absolute left-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
-                aria-label="Previous image"
-              >
-                <ChevronLeft />
-              </button>
-              <button
-                onClick={nextImage}
-                className="absolute right-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
-                aria-label="Next image"
-              >
-                <ChevronRight />
-              </button>
-              <span className="absolute top-4 right-4 bg-red-700 text-white px-3 py-1 rounded-full text-sm">
-                {currentImageIndex + 1} / {images.length}
-              </span>
-            </div>
+          <div
+            className="relative bg-gray-100 rounded-2xl overflow-hidden aspect-[5/5] group"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
+            <img
+              src={images[currentImageIndex] || "/images/img1.jpg"}
+              alt={product.name}
+              className="w-full h-full object-cover"
+              onError={(e) => (e.currentTarget.src = "/images/img1.jpg")}
+            />
 
-            <div className="flex gap-2 overflow-x-auto">
-              {images.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setCurrentImageIndex(i)}
-                  className={`w-16 h-16 overflow-hidden rounded ${
-                    i === currentImageIndex
-                      ? "ring-2 ring-red-700"
-                      : "ring-1 ring-gray-300"
-                  }`}
-                  aria-label={`Show image ${i + 1}`}
-                >
-                  <img
-                    src={img}
-                    alt={`thumb-${i}`}
-                    className="w-full h-full object-cover"
-                  />
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={prevImage}
+              className="absolute left-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
+              aria-label="Previous image"
+            >
+              <ChevronLeft />
+            </button>
+
+            <button
+              onClick={nextImage}
+              className="absolute right-4 top-1/2 -translate-y-1/2 hidden md:block group-hover:opacity-100 opacity-0 transition bg-white p-2 rounded-full text-black"
+              aria-label="Next image"
+            >
+              <ChevronRight />
+            </button>
+
+            <span className="absolute top-4 right-4 bg-red-700 text-white px-3 py-1 rounded-full text-sm">
+              {currentImageIndex + 1} / {images.length}
+            </span>
           </div>
+
+          {/* Thumbnails: 5 per row, wrap to next line */}
+          <div className="grid grid-cols-8 gap-2 mt-3">
+            {images.map((img, i) => (
+              <button
+                key={i}
+                onClick={() => setCurrentImageIndex(i)}
+                className={`w-16 aspect-square overflow-hidden rounded-lg ${
+                  i === currentImageIndex
+                    ? "border-2 border-red-700"
+                    : "border border-gray-300"
+                }`}
+                aria-label={`Show image ${i + 1}`}
+              >
+                <img
+                  src={img}
+                  alt={`thumb-${i}`}
+                  className="w-full h-full object-cover"
+                  onError={(e) => (e.currentTarget.src = "/images/img1.jpg")}
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+
 
           {/* Info Section */}
           <div className="space-y-4">
@@ -707,10 +836,12 @@ export default function ProductDetailPage() {
                     <p className="font-normal text-gray-800 truncate">
                       {item.name}
                     </p>
+                    <StarRating rating={Number(item.rating || 0)} count={Number(item.rating_count || 0)} />
                     {/* price emphasis → strong (700) */}
                     <p className="text-sm text-red-700">
-                      RS: <strong className="font-bold">{item.price}</strong>
+                      AED: <strong className="font-bold">{item.price}</strong>
                     </p>
+
                     {item.printing_methods?.length > 0 && (
                       <p className="text-xs text-gray-500 mt-1">
                         Print: {item.printing_methods.join(", ")}

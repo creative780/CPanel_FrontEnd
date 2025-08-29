@@ -20,8 +20,9 @@ import MobileTopBar from "../../../components/HomePageTop";
 import CardActionButtons from "../../../components/CardActionButtons";
 import { ChatBot } from "../../../components/ChatBot";
 import Footer from "../../../components/Footer";
+import HomePageTop from "../../../components/HomePageTop";
 
-
+import Link from 'next/link';
 
 /* ──────────────────────────────────────────────────────────────────────────
    🔐 Frontend key helper (adds X-Frontend-Key to requests)
@@ -54,17 +55,36 @@ type ProductCard = {
   id: string;
   name: string;
   image: string;
-  badge: string; // stock_status
-  rating: number; // optional UI
+  badge: string;
+  rating: number;
+  rating_count: number; // ← add this
 };
 
-const StarRating = ({ rating }: { rating: number }) => (
-  <div className="text-sm mt-1 font-normal" aria-label={`Rating: ${rating} out of 5 stars`}>
-    {Array.from({ length: 5 }).map((_, i) => (
-      <span key={i} className={i < rating ? "text-yellow-400" : "text-gray-300"}>★</span>
-    ))}
-  </div>
-);
+
+const StarRating = ({ rating, count = 0 }: { rating: number; count?: number }) => {
+  const fullStarUrl =
+    "https://img.icons8.com/?size=100&id=Jy3TrLVOr9Ac&format=png&color=891F1A";
+  const halfStarUrl =
+    "https://img.icons8.com/?size=100&id=m6oA37oGaOEP&format=png&color=891F1A";
+  const emptyStarUrl =
+    "https://img.icons8.com/?size=100&id=103&format=png&color=891F1A"; // black empty star
+
+  // clamp to [0,5] and round to nearest 0.5
+  const r = Math.max(0, Math.min(5, Math.round((Number(rating) || 0) * 2) / 2));
+
+  return (
+    <div className="flex items-center gap mt-1" aria-label={`Rating: ${r} out of 5`}>
+      {Array.from({ length: 5 }).map((_, i) => {
+        const idx = i + 1;
+        if (r >= idx) return <img key={i} src={fullStarUrl} alt="Full star" className="w-4 h-4" loading="lazy" />;
+        if (r >= idx - 0.5) return <img key={i} src={halfStarUrl} alt="Half star" className="w-4 h-4" loading="lazy" />;
+        return <img key={i} src={emptyStarUrl} alt="Empty star" className="w-4 h-4" loading="lazy" />;
+      })}
+      <span className="text-xs text-gray-600 ml-1">({count})</span>
+    </div>
+  );
+};
+
 
 export default function SubCategoryPage() {
   const BATCH_SIZE = 100;
@@ -154,7 +174,7 @@ export default function SubCategoryPage() {
             ? stockData.find((p: any) => `${p.id}` === `${prod.id}`)
             : undefined;
 
-        const image =
+          const image =
             prod.images?.[0]?.url ||
             prod.image?.url ||
             stockMatch?.image ||
@@ -167,9 +187,12 @@ export default function SubCategoryPage() {
             name: prod.name ?? "Unnamed Product",
             image,
             badge,
-            rating: Number(prod.rating ?? 0),
+            rating: Number((prod.rating ?? stockMatch?.rating) ?? 0),
+            rating_count: Number((prod.rating_count ?? stockMatch?.rating_count) ?? 0),
+
           };
         });
+
 
         setAllProducts(formatted);
         setProducts(formatted.slice(0, BATCH_SIZE));
@@ -331,11 +354,6 @@ export default function SubCategoryPage() {
     [cartIds, addToCart, removeFromCart]
   );
 
-  /* ──────────────────────────────────────────────────────────────────────
-     FAVOURITES: DEDUP TOAST + CLICK GUARD (per-product, ~400ms window)
-     Root cause tends to be both an inner icon and its wrapper firing.
-     This ensures a single state change + a single toast per click burst.
-     ────────────────────────────────────────────────────────────────────── */
   const favInvokeAt = useRef<Record<string, number>>({});
   const toastStamp = useRef<Record<string, number>>({});
 
@@ -401,23 +419,87 @@ export default function SubCategoryPage() {
 
   if (loading) {
     return (
-      <div
-        className="p-10 text-center text-gray-500 text-xl font-normal"
-        style={{ fontFamily: "var(--font-poppins)" }}
+    <div
+        className="bg-white overflow-x-hidden"
+        style={{ fontFamily: 'var(--font-poppins), Arial, sans-serif' }}
       >
-        Loading products...
+        <Header />
+        <LogoSection />
+        <HomePageTop />
+        <Navbar />
       </div>
     );
   }
 
   if (notFound) {
     return (
-      <div
-        className="p-10 text-center text-red-600 text-xl font-normal"
-        style={{ fontFamily: "var(--font-poppins)" }}
+  <div
+      className="bg-white overflow-x-hidden lg:overflow-y-hidden"
+      style={{ fontFamily: 'var(--font-poppins), Arial, sans-serif' }}
+    >
+      <Header />
+      <LogoSection />
+      <HomePageTop />
+
+      <main
+        className="grid min-h-[100svh] justify-center mt-10 px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-24"
+        aria-labelledby="page-title"
       >
-        Subcategory not found. Please check the URL.
-      </div>
+        <section className="text-center max-w-2xl w-full">
+          {/* p → Regular */}
+          <p className="mb-4 sm:mb-6 tracking-[0.25em] text-[10px] sm:text-xs font-normal text-[#891F1A]">
+            OOPS! PAGE NOT FOUND
+          </p>
+
+          {/* h1 → Bold */}
+          <h1
+            id="page-title"
+            aria-label="404"
+            className="relative mx-auto mb-4 sm:mb-6 flex items-center justify-center font-bold leading-none text-[#891F1A] select-none"
+          >
+            {/* span digits → Bold */}
+            <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold -mr-2 sm:-mr-4 text-[clamp(6rem,22vw,12rem)]">
+              4
+            </span>
+            <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold -mr-2 sm:-mr-4 text-[clamp(6rem,22vw,12rem)]">
+              0
+            </span>
+            <span className="[-webkit-text-size-adjust:100%] [text-wrap:nowrap] font-bold text-[clamp(6rem,22vw,12rem)]">
+              4
+            </span>
+          </h1>
+
+          {/* p → Regular */}
+          <p className="mx-auto max-w-xl text-sm sm:text-base text-[#891F1A] font-normal px-2">
+            WE ARE SORRY, BUT THE PAGE YOU REQUESTED WAS NOT FOUND. 
+          </p>
+          {/* p → Regular */}
+          <p className="mx-auto max-w-xl text-sm sm:text-base text-[#891F1A] font-normal px-2">
+            It looks like you've navigated to the wrong URL.
+          </p>
+
+          <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 sm:gap-4 w-full">
+            {/* a (Link) → Regular */}
+            <Link
+              href="/"
+              className="inline-flex justify-center rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-normal text-[#891F1A] transition hover:bg-red-500 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            >
+              Go to Home
+            </Link>
+
+            {/* button → Medium */}
+            <button
+              type="button"
+              onClick={() => history.back()}
+              className="inline-flex justify-center rounded-xl bg-[#891F1A] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-red-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            >
+              Go Back
+            </button>
+          </div>
+        </section>
+      </main>
+      <Footer />
+    </div>
     );
   }
 
@@ -444,13 +526,13 @@ export default function SubCategoryPage() {
           {products.map((product) => (
             <div
               key={product.id}
-              className="group relative rounded-2xl overflow-hidden transition-transform"
+              className="group relative overflow-hidden transition-transform"
               tabIndex={0}
             >
               {/* Stock badge */}
               <span
-                className={`absolute top-2 left-2 text-white text-xs px-3 py-1 rounded-full z-20 ${
-                  product.badge?.toLowerCase().includes("out") ? "bg-black text-white" : "bg-red-600"
+                className={`absolute top-2 left-2  text-xs px-3 py-1 rounded-full z-20 ${
+                  product.badge?.toLowerCase().includes("out") ? "bg-white/20 bg-blur text-[#891F1A] text-bold" : "bg-[#891F1A]/70 bg-blur text-white"
                 }`}
               >
                 {product.badge}
@@ -483,8 +565,12 @@ export default function SubCategoryPage() {
                 />
               </div>
 
-              <h2 className="text-xl font-semibold text-gray-800 mt-5">{product.name}</h2>
-              <StarRating rating={product.rating} />
+              <h2 className="text-xl font-semibold text-gray-800 mt-5" onClick={() =>
+                    router.push(
+                      `/home/${encodeURIComponent(category!)}/${encodeURIComponent(subcategory!)}/products/${product.id}`
+                    )
+                  }>{product.name}</h2>
+             <StarRating rating={product.rating} count={product.rating_count} />
             </div>
           ))}
         </div>

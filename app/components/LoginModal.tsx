@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { auth, googleProvider } from "../lib/firebase";
 import {
   createUserWithEmailAndPassword,
@@ -33,11 +33,19 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-// Icon URLs (as requested)
+// Icon URLs
 const ICONS = {
   user: "https://img.icons8.com/?size=100&id=ywULFSPkh4kI&format=png&color=000000",
   email: "https://img.icons8.com/?size=100&id=85500&format=png&color=000000",
   lock: "https://img.icons8.com/?size=100&id=64776&format=png&color=000000",
+};
+
+// ✅ simple email validator (explicit @ requirement)
+const isValidEmail = (v: string) => {
+  const s = v.trim();
+  if (!s.includes("@")) return false; // business rule
+  // light sanity (still allows most valid emails)
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 };
 
 const LoginModal: React.FC<LoginModalProps> = ({
@@ -50,8 +58,48 @@ const LoginModal: React.FC<LoginModalProps> = ({
   onAuth,
   toggleMode,
 }) => {
-  if (!isVisible) return null;
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [tick, setTick] = useState(0); // rerender on input
+
   const isSignup = mode === "signup";
+
+  // recompute validity whenever inputs change
+  const values = useMemo(() => {
+    const name = nameRef.current?.value?.trim() || "";
+    const email = emailRef.current?.value?.trim() || "";
+    const password = passwordRef.current?.value || "";
+    return { name, email, password };
+  }, [tick, nameRef, emailRef, passwordRef, mode]);
+
+  // what’s required per mode
+  const canSubmit = useMemo(() => {
+    if (isSignup) {
+      return (
+        values.name.length > 0 &&
+        values.password.length > 0 &&
+        isValidEmail(values.email)
+      );
+    }
+    // signin: email + password
+    return values.password.length > 0 && isValidEmail(values.email);
+  }, [values, isSignup]);
+
+  useEffect(() => {
+    const handler = () => setTick((x) => x + 1);
+    const n = nameRef.current;
+    const e = emailRef.current;
+    const p = passwordRef.current;
+
+    e?.addEventListener("input", handler);
+    p?.addEventListener("input", handler);
+    n?.addEventListener("input", handler);
+
+    return () => {
+      e?.removeEventListener("input", handler);
+      p?.removeEventListener("input", handler);
+      n?.removeEventListener("input", handler);
+    };
+  }, [nameRef, emailRef, passwordRef]);
 
   const saveUserToBackend = async ({
     user_id,
@@ -64,23 +112,17 @@ const LoginModal: React.FC<LoginModalProps> = ({
     password: string;
     name: string;
   }) => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/save-user/`,
-        withFrontendKey({
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ user_id, email, password, name }),
-        })
-      );
-      const data = await response.json();
-
-      if (!response.ok && data?.error?.includes("unique")) {
-        throw new Error("Email already exists.");
-      }
-    } catch (err) {
-      console.error("Backend save error:", err);
-      throw err;
+    const response = await fetch(
+      `${API_BASE_URL}/api/save-user/`,
+      withFrontendKey({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id, email, password, name }),
+      })
+    );
+    const data = await response.json();
+    if (!response.ok && data?.error?.includes("unique")) {
+      throw new Error("Email already exists.");
     }
   };
 
@@ -106,6 +148,7 @@ const LoginModal: React.FC<LoginModalProps> = ({
 
   const handleGoogleLogin = async () => {
     try {
+      setIsSubmitting(true);
       const result = await signInWithPopup(auth, googleProvider);
       const name = result.user.displayName || "Google User";
       const email = result.user.email || "";
@@ -119,36 +162,55 @@ const LoginModal: React.FC<LoginModalProps> = ({
     } catch (error) {
       toast.error("Google sign-in failed. Please try again.");
       console.error("Google sign-in error:", error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleAuth = async () => {
-    const name = nameRef.current?.value || "";
-    const email = emailRef.current?.value || "";
+    const name = (nameRef.current?.value || "").trim();
+    const email = (emailRef.current?.value || "").trim();
     const password = passwordRef.current?.value || "";
 
-    const isSignup = mode === "signup";
+    // 🔒 Front-door validation (hard stop)
+    if (!isValidEmail(email)) {
+      toast.error("Enter a valid email (must include '@').");
+      return;
+    }
+    if (isSignup) {
+      if (!name) {
+        toast.error("Name is required.");
+        return;
+      }
+      if (!password) {
+        toast.error("Password is required.");
+        return;
+      }
+    } else {
+      if (!password) {
+        toast.error("Password is required.");
+        return;
+      }
+    }
 
     try {
+      setIsSubmitting(true);
       let userId = "";
 
       if (isSignup) {
+        // Try Firebase first; fall back to backend
         try {
           const result = await createUserWithEmailAndPassword(auth, email, password);
           userId = result.user.uid;
-
           await saveUserToFirestore({ user_id: userId, name, email });
         } catch (firebaseError) {
           console.warn("Firebase signup failed. Continuing with backend fallback...");
         }
 
-        const usersRes = await fetch(
-          `${API_BASE_URL}/api/show-user/`,
-          withFrontendKey()
-        );
+        // Check duplicate on backend
+        const usersRes = await fetch(`${API_BASE_URL}/api/show-user/`, withFrontendKey());
         const usersData = await usersRes.json();
         const existingUser = usersData.users.find((u: any) => u.email === email);
-
         if (existingUser) {
           toast.error("Email already exists. Please sign in.");
           throw new Error("Duplicate email");
@@ -171,10 +233,7 @@ const LoginModal: React.FC<LoginModalProps> = ({
         } catch (firebaseLoginError) {
           console.warn("Firebase sign-in failed. Trying backend...");
 
-          const usersRes = await fetch(
-            `${API_BASE_URL}/api/show-user/`,
-            withFrontendKey()
-          );
+          const usersRes = await fetch(`${API_BASE_URL}/api/show-user/`, withFrontendKey());
           const usersData = await usersRes.json();
           const matchedUser = usersData.users.find((u: any) => u.email === email);
 
@@ -190,6 +249,8 @@ const LoginModal: React.FC<LoginModalProps> = ({
     } catch (error) {
       console.error("Auth error:", error);
       toast.error(isSignup ? "Sign-up failed." : "Sign-in failed.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -199,6 +260,8 @@ const LoginModal: React.FC<LoginModalProps> = ({
         ? "text-white placeholder-white border-white bg-transparent md:text-black md:placeholder-gray-500 md:border-gray-300 md:bg-white"
         : "text-black placeholder-gray-500 border-gray-300 bg-white"
     }`;
+
+  if (!isVisible) return null;
 
   return (
     <div
@@ -278,6 +341,8 @@ const LoginModal: React.FC<LoginModalProps> = ({
                 placeholder="Name"
                 className={`${inputClass(isSignup)} pl-10`}
                 aria-label="Name"
+                required
+                aria-required="true"
               />
             </div>
           )}
@@ -295,6 +360,9 @@ const LoginModal: React.FC<LoginModalProps> = ({
               className={`${inputClass(isSignup)} pl-10`}
               aria-label="Email"
               autoComplete="email"
+              required
+              aria-required="true"
+              aria-invalid={!isValidEmail(values.email)}
             />
           </div>
 
@@ -311,13 +379,16 @@ const LoginModal: React.FC<LoginModalProps> = ({
               className={`${inputClass(isSignup)} pl-10 mb-4`}
               aria-label="Password"
               autoComplete={isSignup ? "new-password" : "current-password"}
+              required
+              aria-required="true"
             />
           </div>
 
           {!isSignup && (
             <button
               onClick={handleGoogleLogin}
-              className="cursor-pointer flex items-center justify-center gap-2 w-full px-4 py-3 mb-4 border border-gray-300 rounded-full hover:bg-gray-100 transition font-medium"
+              disabled={isSubmitting}
+              className="cursor-pointer flex items-center justify-center gap-2 w-full px-4 py-3 mb-4 border border-gray-300 rounded-full hover:bg-gray-100 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Sign in with Google"
             >
               <img
@@ -337,9 +408,20 @@ const LoginModal: React.FC<LoginModalProps> = ({
 
           <button
             onClick={handleAuth}
-            className="bg-[#ff5858] hover:bg-[#e94b4b] transition text-white font-medium px-6 py-3 rounded-full text-base mb-3 w-full"
+            disabled={!canSubmit || isSubmitting}
+            aria-disabled={!canSubmit || isSubmitting}
+            className={`${
+              !canSubmit || isSubmitting ? "opacity-50 cursor-not-allowed" : ""
+            } bg-[#ff5858] hover:bg-[#e94b4b] transition text-white font-medium px-6 py-3 rounded-full text-base mb-3 w-full`}
+            title={
+              !canSubmit
+                ? isSignup
+                  ? "Enter name, a valid email, and password"
+                  : "Enter a valid email and password"
+                : ""
+            }
           >
-            {isSignup ? "SIGN UP" : "SIGN IN"}
+            {isSubmitting ? (isSignup ? "CREATING..." : "SIGNING IN...") : isSignup ? "SIGN UP" : "SIGN IN"}
           </button>
 
           <button
