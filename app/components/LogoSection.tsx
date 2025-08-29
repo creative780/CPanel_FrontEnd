@@ -17,7 +17,33 @@ const withFrontendKey = (init: RequestInit = {}): RequestInit => {
   return { ...init, headers };
 };
 
-/* ===================== API TYPES (from your backend response) ===================== */
+/* ===================== API TYPES (from your backend response) =====================
+
+Response: Array<CategoryRaw>
+CategoryRaw = {
+  id: string|number,
+  name: string,
+  images: string[],
+  url: string,
+  subcategories: Array<SubcategoryRaw>
+}
+
+SubcategoryRaw = {
+  id: string|number,
+  name: string,
+  images: string[],
+  url: string,
+  products: Array<ProductRaw>
+}
+
+ProductRaw = {
+  id: string|number,
+  name: string,
+  images: string[],
+  url: string
+}
+===================================================================================*/
+
 type ID = string | number;
 
 interface ProductRaw {
@@ -43,7 +69,14 @@ interface CategoryRaw {
 
 /** Flattened lookup shapes */
 type Cat = { id: ID; name: string; url: string; images: string[] };
-type Sub = { id: ID; name: string; url: string; images: string[]; catId: ID; catName: string };
+type Sub = {
+  id: ID;
+  name: string;
+  url: string;
+  images: string[];
+  catId: ID;
+  catName: string;
+};
 type Prod = {
   id: ID;
   name: string;
@@ -84,45 +117,38 @@ export default function LogoSection() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Auth state
+  // Auth state (kept as-is from your original)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
 
       if (firebaseUser) {
-        let displayName: string | null =
-          // ✅ PRIORITY 1: Google displayName (immediate, no network)
-          firebaseUser.displayName || null;
+        let displayName: string | null = null;
 
-        // ✅ PRIORITY 2: Firestore profile (users/<uid>.username)
-        if (!displayName) {
-          try {
-            const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-            if (userDoc.exists()) {
-              const data = userDoc.data();
-              displayName = (data as any).username || null;
-            }
-          } catch {
-            /* ignore */
+        try {
+          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            displayName = (data as any).username;
           }
-        }
+        } catch {}
 
-        // ✅ PRIORITY 3: Backend /api/show-user/ (user_id match)
         if (!displayName) {
           try {
-            const res = await fetch(`${API_BASE_URL}/api/show-user/`, withFrontendKey());
+            const res = await fetch(
+              `${API_BASE_URL}/api/show-user/`,
+              withFrontendKey()
+            );
             const data = await res.json();
-            const found = data.users?.find((u: any) => u.user_id === firebaseUser.uid);
-            // handle both name/first_name just in case
-            displayName = found?.name || found?.first_name || null;
-          } catch {
-            /* ignore */
-          }
+            const found = data.users?.find(
+              (u: any) => u.user_id === firebaseUser.uid
+            );
+            displayName = found?.name || null;
+          } catch {}
         }
 
-        // ✅ PRIORITY 4: Email prefix
-        if (!displayName) displayName = firebaseUser.email?.split("@")[0] || "User";
-
+        if (!displayName)
+          displayName = firebaseUser.email?.split("@")[0] || "User";
         setUsername(displayName);
       } else {
         setUsername(null);
@@ -164,7 +190,10 @@ export default function LogoSection() {
   // Close dropdown on outside click or Esc
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) {
+      if (
+        searchWrapRef.current &&
+        !searchWrapRef.current.contains(e.target as Node)
+      ) {
         setShowSearch(false);
       }
     }
@@ -184,7 +213,8 @@ export default function LogoSection() {
     setIsVisible(true);
   };
   const closeModal = () => setIsVisible(false);
-  const toggleMode = () => setMode((p) => (p === "signin" ? "signup" : "signin"));
+  const toggleMode = () =>
+    setMode((p) => (p === "signin" ? "signup" : "signin"));
 
   const handleLogout = async () => {
     try {
@@ -196,7 +226,7 @@ export default function LogoSection() {
         position: "right",
         backgroundColor: "linear-gradient(to right, #ff5f6d, #ffc371)",
       }).showToast();
-    } catch {
+    } catch (error: any) {
       alert("Error during logout.");
     }
   };
@@ -215,7 +245,12 @@ export default function LogoSection() {
     const subs: Sub[] = [];
     const prods: Prod[] = [];
     navData.forEach((cat) => {
-      cats.push({ id: cat.id, name: cat.name, url: cat.url, images: cat.images || [] });
+      cats.push({
+        id: cat.id,
+        name: cat.name,
+        url: cat.url,
+        images: cat.images || [],
+      });
       cat.subcategories?.forEach((sub) => {
         subs.push({
           id: sub.id,
@@ -245,8 +280,12 @@ export default function LogoSection() {
   /* ============================== Fuzzy Search =============================== */
 
   const norm = (s: string) =>
-    s.toLowerCase().normalize("NFKD").replace(/\p{Diacritic}/gu, "");
+    s
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/\p{Diacritic}/gu, "");
 
+  // Basic Damerau–Levenshtein for short strings (fast enough here)
   function editDistance(a: string, b: string) {
     const al = a.length;
     const bl = b.length;
@@ -297,6 +336,7 @@ export default function LogoSection() {
     return 1 - dist / Math.max(1, maxLen); // 0..1
   };
 
+  // Score arrays
   type Scored<T> = { item: T; score: number };
 
   function topMatches<T extends { name: string }>(
@@ -317,6 +357,7 @@ export default function LogoSection() {
     return results.slice(0, limit);
   }
 
+  // Determine intent (category, subcategory, product) by best score
   function detectIntent(q: string) {
     const cm = topMatches(cats, q, 0.55, 5);
     const sm = topMatches(subs, q, 0.5, 5);
@@ -326,26 +367,77 @@ export default function LogoSection() {
     const bestSub = sm[0];
     const bestProd = pm[0];
 
-    const includesBoost = (name: string) => (norm(name).includes(norm(q)) ? 0.05 : 0);
+    // Prefer direct includes > fuzzy if close
+    const includesBoost = (name: string) =>
+      norm(name).includes(norm(q)) ? 0.05 : 0;
 
-    const catScore = bestCat ? bestCat.score + includesBoost(bestCat.item.name) : 0;
-    const subScore = bestSub ? bestSub.score + includesBoost(bestSub.item.name) : 0;
-    const prodScore = bestProd ? bestProd.score + includesBoost(bestProd.item.name) : 0;
+    const catScore = bestCat
+      ? bestCat.score + includesBoost(bestCat.item.name)
+      : 0;
+    const subScore = bestSub
+      ? bestSub.score + includesBoost(bestSub.item.name)
+      : 0;
+    const prodScore = bestProd
+      ? bestProd.score + includesBoost(bestProd.item.name)
+      : 0;
 
     if (catScore >= subScore && catScore >= prodScore && catScore >= 0.58) {
-      return { type: "category" as const, target: bestCat!.item, suggestions: cm.slice(1, 4) };
+      return {
+        type: "category" as const,
+        target: bestCat!.item,
+        suggestions: cm.slice(1, 4),
+      };
     }
     if (subScore >= prodScore && subScore >= 0.55) {
-      return { type: "subcategory" as const, target: bestSub!.item, suggestions: sm.slice(1, 4) };
+      return {
+        type: "subcategory" as const,
+        target: bestSub!.item,
+        suggestions: sm.slice(1, 4),
+      };
     }
     if (bestProd && prodScore >= 0.55) {
-      return { type: "product" as const, target: bestProd!.item, suggestions: pm.slice(1, 4) };
+      return {
+        type: "product" as const,
+        target: bestProd!.item,
+        suggestions: pm.slice(1, 4),
+      };
     }
     // fallback: show broad matches grouped by category
-    return { type: "broad" as const, target: null, suggestions: [...cm, ...sm, ...pm].slice(0, 3) };
+    return {
+      type: "broad" as const,
+      target: null,
+      suggestions: [...cm, ...sm, ...pm].slice(0, 3),
+    };
   }
 
-  const intent = useMemo(() => detectIntent(debouncedQuery), [debouncedQuery, cats, subs, prods]);
+  /* ========================= Build Result Collections ========================= */
+
+  // For infinite-ish loading
+  const ITEMS_PER_LOAD = 20;
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [loadedCount, setLoadedCount] = useState(ITEMS_PER_LOAD);
+  useEffect(() => setLoadedCount(ITEMS_PER_LOAD), [debouncedQuery]); // reset on new query
+
+  useEffect(() => {
+    function onScroll() {
+      const el = scrollerRef.current;
+      if (!el) return;
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+      if (nearBottom) {
+        setLoadedCount((c) => c + ITEMS_PER_LOAD);
+      }
+    }
+    const el = scrollerRef.current;
+    if (el) el.addEventListener("scroll", onScroll);
+    return () => {
+      if (el) el.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  const intent = useMemo(
+    () => detectIntent(debouncedQuery),
+    [debouncedQuery, cats, subs, prods]
+  );
 
   // Build view model based on intent
   type ViewItem =
@@ -375,7 +467,9 @@ export default function LogoSection() {
 
       // Products in category (all subcategories)
       const prodsInCat = prods.filter((p) => p.catId === cat.id);
-      prodsInCat.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
+      prodsInCat.forEach((p) =>
+        items.push({ kind: "product", key: `p-${p.id}`, prod: p })
+      );
 
       return items;
     }
@@ -383,7 +477,11 @@ export default function LogoSection() {
     if (intent.type === "subcategory" && intent.target) {
       const sub = intent.target as Sub;
       // Header: Category
-      items.push({ kind: "header", key: `cat-${sub.catId}`, text: sub.catName });
+      items.push({
+        kind: "header",
+        key: `cat-${sub.catId}`,
+        text: sub.catName,
+      });
       // Chips: sibling subcategories (same category)
       const siblings = subs.filter((s) => s.catId === sub.catId);
       if (siblings.length) {
@@ -395,11 +493,17 @@ export default function LogoSection() {
       }
       // Products: first subcategory products
       const subProds = prods.filter((p) => p.subId === sub.id);
-      subProds.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
+      subProds.forEach((p) =>
+        items.push({ kind: "product", key: `p-${p.id}`, prod: p })
+      );
 
       // Secondary: rest products in same category
-      const catRemainder = prods.filter((p) => p.catId === sub.catId && p.subId !== sub.id);
-      catRemainder.forEach((p) => items.push({ kind: "product", key: `p2-${p.id}`, prod: p }));
+      const catRemainder = prods.filter(
+        (p) => p.catId === sub.catId && p.subId !== sub.id
+      );
+      catRemainder.forEach((p) =>
+        items.push({ kind: "product", key: `p2-${p.id}`, prod: p })
+      );
 
       return items;
     }
@@ -407,7 +511,11 @@ export default function LogoSection() {
     if (intent.type === "product" && intent.target) {
       const prodHit = intent.target as Prod;
       // Header: Category
-      items.push({ kind: "header", key: `cat-${prodHit.catId}`, text: prodHit.catName });
+      items.push({
+        kind: "header",
+        key: `cat-${prodHit.catId}`,
+        text: prodHit.catName,
+      });
       // Chips: subcategories (same category)
       const siblings = subs.filter((s) => s.catId === prodHit.catId);
       if (siblings.length) {
@@ -420,14 +528,21 @@ export default function LogoSection() {
 
       // Subcategory products first; ensure hit product appears first
       const subProds = prods.filter((p) => p.subId === prodHit.subId);
-      const sortedSubProds = [prodHit, ...subProds.filter((p) => p.id !== prodHit.id)];
-      sortedSubProds.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
+      const sortedSubProds = [
+        prodHit,
+        ...subProds.filter((p) => p.id !== prodHit.id),
+      ];
+      sortedSubProds.forEach((p) =>
+        items.push({ kind: "product", key: `p-${p.id}`, prod: p })
+      );
 
       // Then remainder of category
       const catRemainder = prods.filter(
         (p) => p.catId === prodHit.catId && p.subId !== prodHit.subId
       );
-      catRemainder.forEach((p) => items.push({ kind: "product", key: `p2-${p.id}`, prod: p }));
+      catRemainder.forEach((p) =>
+        items.push({ kind: "product", key: `p2-${p.id}`, prod: p })
+      );
 
       return items;
     }
@@ -436,11 +551,16 @@ export default function LogoSection() {
     const scored = topMatches(prods, debouncedQuery, 0.45, 200);
     const grouped = new Map<ID, { catName: string; items: Prod[] }>();
     for (const { item } of scored) {
-      if (!grouped.has(item.catId)) grouped.set(item.catId, { catName: item.catName, items: [] });
+      if (!grouped.has(item.catId))
+        grouped.set(item.catId, { catName: item.catName, items: [] });
       grouped.get(item.catId)!.items.push(item);
     }
     for (const [catId, group] of grouped.entries()) {
-      items.push({ kind: "header", key: `cat-${String(catId)}`, text: group.catName });
+      items.push({
+        kind: "header",
+        key: `cat-${String(catId)}`,
+        text: group.catName,
+      });
       const subOfCat = subs.filter((s) => s.catId === catId);
       if (subOfCat.length) {
         items.push({
@@ -449,7 +569,9 @@ export default function LogoSection() {
           chips: subOfCat.map((s) => ({ text: s.name })),
         });
       }
-      group.items.forEach((p) => items.push({ kind: "product", key: `p-${p.id}`, prod: p }));
+      group.items.forEach((p) =>
+        items.push({ kind: "product", key: `p-${p.id}`, prod: p })
+      );
     }
     return items;
   }, [debouncedQuery, intent, prods, subs]);
@@ -461,7 +583,9 @@ export default function LogoSection() {
       return intent.suggestions.map((s) => s.item.name);
     }
     const extras =
-      intent.suggestions?.map((s: any) => s.item.name).filter((n: string) => !!n) || [];
+      intent.suggestions
+        ?.map((s: any) => s.item.name)
+        .filter((n: string) => !!n) || [];
     return extras.slice(0, 3);
   }, [intent, debouncedQuery]);
 
@@ -486,7 +610,9 @@ export default function LogoSection() {
   return (
     <>
       <div
-        style={{ fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif" }}
+        style={{
+          fontFamily: "var(--font-poppins), Arial, Helvetica, sans-serif",
+        }}
         className="flex-col sm:flex-col lg:flex-row bg-white gap-8 items-center justify-center px-4 sm:px-6 lg:px-24 py-4 hidden md:flex mx-auto"
       >
         <div className="flex flex-row flex-wrap w-full lg:w-[80%] gap-8 items-center">
@@ -543,17 +669,24 @@ export default function LogoSection() {
                 role="listbox"
                 aria-label="Search suggestions"
               >
-                {/* Status / badges header */}
+                {/* Status / badges header (acts like a minor heading → keep 600) */}
                 <div className="px-4 pt-3 text-xs text-gray-500 font-light">
                   {loading && "Fetching catalog…"}
-                  {!loading && !error && quickBadges.length > 0 && "Quick categories:"}
-                  {!loading && !error && quickBadges.length === 0 && "No categories found."}
+                  {!loading &&
+                    !error &&
+                    quickBadges.length > 0 &&
+                    "Quick categories:"}
+                  {!loading &&
+                    !error &&
+                    quickBadges.length === 0 &&
+                    "No categories found."}
                   {error && <span className="text-red-600">{error}</span>}
                 </div>
 
                 {/* Real category badges only (from API) */}
                 {quickBadges.length > 0 && (
                   <div className="px-4 pb-3 pt-2 flex flex-wrap gap-2 border-b border-gray-100">
+                    {/* nav/chips → treat as navigation items → 500 */}
                     {quickBadges.slice(0, 12).map((b) => (
                       <button
                         key={b}
@@ -597,7 +730,11 @@ export default function LogoSection() {
                         {visibleItems.map((it) => {
                           if (it.kind === "header") {
                             return (
-                              <li key={it.key} className="py-2 bg-white text-black top-0 z-10">
+                              <li
+                                key={it.key}
+                                className="py-2 bg-white text-black top-0 z-10"
+                              >
+                                {/* section header → 600 */}
                                 <div className="px-4 py-1 text-xs font-semibold tracking-wide uppercase text-red-700">
                                   {it.text}
                                 </div>
@@ -606,7 +743,10 @@ export default function LogoSection() {
                           }
                           if (it.kind === "chips") {
                             return (
-                              <li key={it.key} className="px-4 py-2 bg-white text-black">
+                              <li
+                                key={it.key}
+                                className="px-4 py-2 bg-white text-black"
+                              >
                                 <div className="flex flex-wrap gap-2">
                                   {it.chips.map((c, idx) => (
                                     <button
@@ -645,11 +785,16 @@ export default function LogoSection() {
                                   height={56}
                                 />
                                 <div className="min-w-0 flex-1">
+                                  {/* product name → 500 */}
                                   <span className="block font-medium text-sm sm:text-base text-gray-900 truncate">
                                     {p.name}
                                   </span>
+                                  {/* meta → 400 / inner span also 400 */}
                                   <p className="text-xs sm:text-sm text-gray-600 font-normal line-clamp-2">
-                                    {p.subName} • <span className="text-gray-500 font-normal">{p.catName}</span>
+                                    {p.subName} •{" "}
+                                    <span className="text-gray-500 font-normal">
+                                      {p.catName}
+                                    </span>
                                   </p>
                                 </div>
                               </button>
@@ -665,10 +810,16 @@ export default function LogoSection() {
                   </div>
                 ) : (
                   <div className="px-4 py-4 text-xs text-gray-500 font-light">
-                    Start typing a <span className="font-semibold text-red-700">Category</span>,
-                    <span className="font-semibold text-red-700"> Subcategory</span>, or a
-                    <span className="font-semibold text-red-700"> Product</span>. Results adapt to
-                    what you’re looking for.
+                    Start typing a{" "}
+                    <span className="font-semibold text-red-700">Category</span>
+                    ,
+                    <span className="font-semibold text-red-700">
+                      {" "}
+                      Subcategory
+                    </span>
+                    , or a
+                    <span className="font-semibold text-red-700"> Product</span>
+                    . Results adapt to what you’re looking for.
                   </div>
                 )}
               </div>
@@ -689,7 +840,9 @@ export default function LogoSection() {
               height={20}
               className="-ml-5 w-5 h-5 left-3"
             />
-            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Cart</span>
+            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">
+              Cart
+            </span>
           </Link>
 
           <Link
@@ -703,7 +856,10 @@ export default function LogoSection() {
               height={20}
               className="-ml-5 w-5 h-5 left-3"
             />
-            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">Blog</span>
+
+            <span className="-ml-1 whitespace-nowrap text-sm font-medium text-white">
+              Blog
+            </span>
           </Link>
 
           <Link href="/contact">
@@ -715,6 +871,7 @@ export default function LogoSection() {
                 height={20}
                 className="-ml-5 w-5 h-5 left-3"
               />
+              {/* link text → 400/500; make it 500 as nav */}
               <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
                 Contact
               </span>
@@ -729,6 +886,7 @@ export default function LogoSection() {
               height={21}
               className="w-[21px] h-[21px]"
             />
+            {/* nav link → 500 */}
             <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
               <a href="/about">About</a>
             </span>
@@ -749,7 +907,10 @@ export default function LogoSection() {
                     height={20}
                     className="mr-1"
                   />
-                  <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">Login</span>
+                  {/* span → 400 */}
+                  <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
+                    Login
+                  </span>
                 </div>
               </button>
             ) : (
@@ -761,11 +922,13 @@ export default function LogoSection() {
                   height={20}
                   className="ml-2"
                 />
+                {/* username → 400 */}
                 <span className="-ml-1 whitespace-nowrap text-sm font-medium text-black">
                   {username}
                 </span>
 
                 <div className="flex items-center gap-3">
+                  {/* buttons → 500 */}
                   <button
                     onClick={handleLogout}
                     aria-label="Logout"
@@ -778,7 +941,9 @@ export default function LogoSection() {
                       height={20}
                       className="-ml-5"
                     />
-                    <span className="whitespace-nowrap text-sm font-medium text-white">Log Out</span>
+                    <span className="whitespace-nowrap text-sm font-medium text-white">
+                      Log Out
+                    </span>
                   </button>
                 </div>
               </div>
