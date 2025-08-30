@@ -1,11 +1,12 @@
 // app/sitemap.xml/route.ts
 
-export const revalidate = 60 * 60; // regenerate hourly
+// ✅ Use a literal, not 60 * 60
+export const revalidate = 3600;       // 1 hour
 export const dynamic = "force-static";
 
 const SITE = "https://app.click2print.store";
 
-// Pages you want in the sitemap (order matters if you care)
+// Pages you want in the sitemap
 const PAGES: Array<{ path: string; priority: string }> = [
   { path: "/home",      priority: "1.00" },
   { path: "/checkout2", priority: "0.80" },
